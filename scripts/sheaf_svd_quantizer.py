@@ -18,9 +18,9 @@ maps F_{v ⊴ e}).
   and hardware_piping llama bridge) + optional quantized weight dict ready for
   GGUF conversion tooling.
 
-This is the Python-side topological pre-processing that mathematically guarantees
-the 70B autoregressive model stays inside a 6GB UMA envelope while preserving the
-1:1 true-to-life H0 global section (the "map generates the territory").
+This experimental dense proxy does not verify model fidelity, homology, or a
+6GB UMA bound. Use only appropriately sized matrices; checkpoint loading and
+SVD are not streamed. A custom GGUF execution backend is not implemented.
 
 Ties directly to:
 - llm_component_topological_analyzer.py (the 0-dim stalks of the model itself
@@ -33,7 +33,7 @@ Ties directly to:
   resulting GGUF and harvest improved Δλ1 preservations).
 
 Usage (demo on synthetic "70B-proxy"):
-    python scripts/sheaf_svd_quantizer.py --model synthetic --hidden 4096 --layers 4 --out config/ternary_70b_proxy.ggufmap.json
+    python scripts/sheaf_svd_quantizer.py --model synthetic --hidden 32 --layers 1 --out config/ternary_70b_proxy.ggufmap.json
 
 For real:
     python scripts/sheaf_svd_quantizer.py --model /path/to/model.safetensors --layers all --preserve-ratio 0.18
@@ -114,6 +114,9 @@ def build_weight_sheaf(
     if n == 0:
         return np.eye(1), ["dummy"], np.eye(1)
 
+    if n > 2048:
+        raise ValueError("Experimental dense sheaf is limited to 2048 feature nodes; streaming is not implemented")
+
     # Build adjacency / degree for the sheaf graph Laplacian (simple graph version first)
     # Then "sheaf-ify" by using the actual linear maps W as the transport on edges.
     A = np.zeros((n, n), dtype=np.float64)
@@ -158,6 +161,7 @@ def build_weight_sheaf(
             energy = np.abs(L_F).sum(axis=0)
             keep = np.argsort(energy)[-max(32, n // 3):]
             L_F = L_F[np.ix_(keep, keep)]
+            A = A[np.ix_(keep, keep)]
             node_names = [node_names[k] for k in keep]
             print(f"[sheaf_svd_quantizer] UMA prune applied: {n} -> {len(node_names)} nodes (discrete-morse spirit)")
         except Exception:
@@ -178,6 +182,10 @@ def sheaf_svd_quantize(
     Core Node λ logic.
     Returns a complete "ternary_gguf_map" ready for the llama.cpp shim and hardware bridge.
     """
+    if not 0 < preserve_ratio <= 1:
+        raise ValueError("preserve_ratio must be in (0, 1]")
+    if not layers or any(W.ndim != 2 or not W.size or not np.isfinite(W).all() for W in layers.values()):
+        raise ValueError("layers must contain nonempty finite matrices")
     print(f"[Node λ] Building sheaf over {len(layers)} weight matrices (preserve H0 ratio={preserve_ratio})...")
     L_F, node_names, R = build_weight_sheaf(layers)
 
@@ -199,8 +207,10 @@ def sheaf_svd_quantize(
     # Find the cutoff that keeps roughly the "preserve_ratio" mass in the principal direction(s)
     k = max(1, int(np.searchsorted(cumulative, preserve_ratio) + 1))
     h0_maintainer_energy = float(np.sum(S[:k]))
+    loadings = np.sum(np.square(U[:, :k]) * S[:k], axis=1)
+    maintainer_indices = np.argsort(-loadings, kind="stable")[:min(k, len(node_names))]
 
-    print(f"[Node λ] λ1 (top {k} components) captures {preserve_ratio*100:.1f}% target → actual {cumulative[min(k, len(cumulative)-1)]*100:.2f}% energy")
+    print(f"[Node λ] λ1 (top {k} components) captures {preserve_ratio*100:.1f}% target → actual {cumulative[min(k-1, len(cumulative)-1)]*100:.2f}% energy")
     print(f"[Node λ] H0 maintainer slice energy: {h0_maintainer_energy:.4f} / {total_energy:.4f}")
 
     # For each original weight matrix, project its entries onto the principal direction
@@ -210,15 +220,18 @@ def sheaf_svd_quantize(
 
     quant_map: Dict[str, Any] = {
         "format": "ZULU_YOKOHAMA_TERNARY_GGUF_MAP_v1",
-        "epistemic_bounds": "2010HRS_CONVERGENCE",
+        "epistemic_bounds": "experimental_proxy",
+        "homology_preservation": "not_checked",
+        "uma_bound_verified": False,
+        "execution_status": "custom_backend_not_implemented",
         "hardware": "6GB_UMA",
         "preserve_ratio": preserve_ratio,
         "h0_maintainer_energy": h0_maintainer_energy,
         "total_singular_energy": total_energy,
         "ternary_basis": Ternary,
         "layers": {},
-        "global_h0_nodes": [node_names[i] for i in range(min(k, len(node_names)))],
-        "note": "Only the H0 global section (ker L_F after prune) is locked high-precision. Everything else is forced through the {0,1,3} crystal. This .ggufmap is the physical route for the 0-dim stalks.",
+        "global_h0_nodes": [node_names[int(i)] for i in maintainer_indices],
+        "note": "Experimental magnitude codes and dominant singular-subspace node representatives. H0 membership, model fidelity, and physical execution are not verified.",
     }
 
     for layer_name, W in layers.items():
@@ -230,7 +243,8 @@ def sheaf_svd_quantize(
         p0, p1 = ternary_levels
         q0 = flat < (p0 * flat.max() if flat.max() > 0 else 0)
         q1 = (flat >= (p0 * flat.max())) & (flat < (p1 * flat.max()))
-        q3 = flat >= (p1 * flat.max())
+        q3 = (flat > 0) & (flat >= (p1 * flat.max()))
+        q0 = ~(q1 | q3)
 
         n0, n1, n3 = int(q0.sum()), int(q1.sum()), int(q3.sum())
         total = n0 + n1 + n3
@@ -261,8 +275,10 @@ def sheaf_svd_quantize(
     return quant_map
 
 
-def load_synthetic_model(hidden: int = 4096, n_layers: int = 4, seed: int = 1917) -> Dict[str, np.ndarray]:
+def load_synthetic_model(hidden: int = 32, n_layers: int = 1, seed: int = 1917) -> Dict[str, np.ndarray]:
     """Synthetic proxy that scales in comments to 70B (70B has ~80-120 layers, hidden 8192-16384+)."""
+    if hidden < 1 or n_layers < 1 or hidden * n_layers * 18 > 2048:
+        raise ValueError("Synthetic demo exceeds the 2048-feature dense limit")
     rng = np.random.default_rng(seed)
     layers = {}
     for i in range(n_layers):
@@ -278,51 +294,42 @@ def load_synthetic_model(hidden: int = 4096, n_layers: int = 4, seed: int = 1917
 def main():
     ap = argparse.ArgumentParser(description="Node λ — Sheaf SVD Quantizer (ZULU_YOKOHAMA 70B→6GB UMA)")
     ap.add_argument("--model", default="synthetic", help="Path to .safetensors / .pt or 'synthetic'")
-    ap.add_argument("--hidden", type=int, default=4096)
-    ap.add_argument("--layers", type=int, default=4)
+    ap.add_argument("--hidden", type=int, default=32)
+    ap.add_argument("--layers", default="1", help="Positive matrix count or all for checkpoints")
     ap.add_argument("--preserve-ratio", type=float, default=0.18)
-    ap.add_argument("--output", default="config/ternary_70b_ggufmap.json")
+    ap.add_argument("--output", "--out", default="config/ternary_70b_ggufmap.json")
     args = ap.parse_args()
 
-    if args.model == "synthetic":
-        layers = load_synthetic_model(args.hidden, args.layers)
+    if args.layers == "all":
+        layer_limit = None
     else:
-        # Real-model path (2105 advisor extension): support safetensors + basic HF layer extraction.
-        # This enables "real 70B weight streaming" when the user has the weights on disk (under 6GB UMA constraints via RLM chunking per layer).
-        layers = {}
-        model_path = args.model
         try:
-            # Prefer safetensors (zero torch dependency for metadata + weights when possible)
-            from safetensors import safe_open
-            with safe_open(model_path, framework="np", device="cpu") as f:
-                for key in f.keys():
-                    if any(k in key.lower() for k in ["weight", "q_proj", "k_proj", "v_proj", "o_proj", "gate", "up", "down", "fc", "linear"]):
-                        # Only pull large matrices (the actual linear maps we want to sheaf-analyze)
-                        arr = f.get_tensor(key)
-                        if arr.ndim == 2 and min(arr.shape) > 32:  # skip tiny embeddings etc.
-                            layers[key] = arr.astype(np.float32)
-                            if len(layers) >= 20:  # stream limit for UMA demo
-                                break
-            print(f"[Node λ] Loaded {len(layers)} weight matrices from safetensors (real model path).")
-        except Exception as e1:
-            try:
-                import torch
-                sd = torch.load(model_path, map_location="cpu")
-                if hasattr(sd, "state_dict"):
-                    sd = sd.state_dict()
-                for k, v in sd.items():
-                    if isinstance(v, torch.Tensor) and v.ndim == 2 and min(v.shape) > 32:
-                        if any(kk in k.lower() for kk in ["weight", "proj", "linear", "fc", "gate", "up", "down"]):
-                            layers[k] = v.float().numpy()
-                            if len(layers) >= 20:
-                                break
-                print(f"[Node λ] Loaded {len(layers)} weight matrices via torch (real model path).")
-            except Exception as e2:
-                print(f"[Node λ] Could not load real model ({e1} / {e2}). Falling back to synthetic proxy.")
-                layers = load_synthetic_model(args.hidden, min(args.layers, 2))
-
+            layer_limit = int(args.layers)
+        except ValueError:
+            ap.error("--layers must be a positive integer or all")
+        if layer_limit < 1:
+            ap.error("--layers must be positive")
+    if args.model == "synthetic":
+        if layer_limit is None:
+            ap.error("--layers all requires a checkpoint")
+        layers = load_synthetic_model(args.hidden, layer_limit)
+    else:
+        # Safetensors is the only supported checkpoint format. Never fall back to
+        # pickle or generate an unrelated synthetic map for a requested model.
+        model_path = Path(args.model)
+        if model_path.suffix != ".safetensors":
+            ap.error("Checkpoint inputs must use .safetensors")
+        from safetensors import safe_open
+        layers = {}
+        with safe_open(str(model_path), framework="np", device="cpu") as checkpoint:
+            for key in checkpoint.keys():
+                view = checkpoint.get_slice(key)
+                if len(view.get_shape()) == 2:
+                    layers[key] = checkpoint.get_tensor(key).astype(np.float32)
+                    if layer_limit is not None and len(layers) >= layer_limit:
+                        break
         if not layers:
-            layers = load_synthetic_model(args.hidden, min(args.layers, 2))
+            ap.error("Checkpoint has no matrix tensors")
 
     qmap = sheaf_svd_quantize(layers, preserve_ratio=args.preserve_ratio)
 
@@ -334,8 +341,7 @@ def main():
     print(f"\n[Node λ] Wrote {out_path}")
     print(f"  H0 maintainer energy preserved: {qmap['h0_maintainer_energy']:.4f}")
     print(f"  Ternary basis: {qmap['ternary_basis']}")
-    print(f"  This map + the ggml_ternary_shim.cpp + hardware_piping bridge = the bare-metal execution route for the 0-dim stalks.")
-    print("  Only coherent H0 sections ever reach the specialized GGUF.")
+    print("  Experimental map only: custom GGUF loading, model fidelity, and UMA bounds are not verified.")
 
     # Optional: also exercise the governor with a token list derived from the H0 nodes (demo of ν)
     if TopologicalKVGovernor is not None:
@@ -344,7 +350,7 @@ def main():
             gov = TopologicalKVGovernor(transducer=t, vram_limit_gb=6.0)
             h0_tokens = qmap.get("global_h0_nodes", [])[:20]
             gov.project_tokens([str(x) for x in h0_tokens])
-            ev = gov.evict_if_needed(current_vram_gb=5.7)
+            ev = gov.govern([str(x) for x in h0_tokens], current_vram_gb=5.7)
             print(f"  [KV demo] Governor would evict {len(ev.get('evicted',[]))} low-energy tokens while locking H0 maintainers.")
         except Exception as e:
             print(f"  [KV demo] Skipped: {e}")

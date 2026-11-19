@@ -15,8 +15,7 @@ Binds to MCP for hardware polling and eviction triggers.
 
 Usage:
     governor = TopologicalKVGovernor(transducer_state)
-    governor.project_tokens(context_tokens)
-    governor.evict_if_needed(current_vram_gb=5.9)
+    governor.govern(context_tokens, current_vram_gb=5.9)
 """
 
 import heapq
@@ -26,7 +25,10 @@ from dataclasses import dataclass, field
 from typing import List, Dict, Any, Optional, Tuple
 import numpy as np
 
-from rotary_condition_state import HybridConditionStateTransducer  # for L_F access
+try:
+    from .rotary_condition_state import HybridConditionStateTransducer
+except ImportError:
+    from rotary_condition_state import HybridConditionStateTransducer
 
 @dataclass
 class TokenEnergy:
@@ -39,7 +41,7 @@ class TokenEnergy:
 
     def __lt__(self, other):
         if self.is_h0_maintainer != other.is_h0_maintainer:
-            return self.is_h0_maintainer  # maintainers have lower priority for eviction (False < True? Wait, min-heap evicts low energy first)
+            return not self.is_h0_maintainer  # maintainers have lower priority for eviction (False < True? Wait, min-heap evicts low energy first)
         return self.energy < other.energy  # evict lowest energy first
 
 class TopologicalKVGovernor:
@@ -64,6 +66,10 @@ class TopologicalKVGovernor:
         Returns dict of token_id -> energy (projection magnitude).
         In real: use actual attention matrix from inference backend + L_F from current sheaf state.
         """
+        self.token_map.clear()
+        self.token_heap.clear()
+        self.h0_maintainers.clear()
+        self.current_context = list(tokens)
         if not tokens:
             return {}
 
@@ -115,9 +121,8 @@ class TopologicalKVGovernor:
         # In real: tokens that stabilize the sheaf (low contribution to L_F energy)
         maintainers = {tid for tid, te in self.token_map.items() if te.energy > threshold}
         self.h0_maintainers = maintainers
-        for tid in maintainers:
-            if tid in self.token_map:
-                self.token_map[tid].is_h0_maintainer = True
+        for tid, token in self.token_map.items():
+            token.is_h0_maintainer = tid in maintainers
         return maintainers
 
     def evict_low_energy(self, current_vram_gb: float) -> List[int]:

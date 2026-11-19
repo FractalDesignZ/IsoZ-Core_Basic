@@ -1,5 +1,7 @@
 {
-  "map_type": "geometric_prime_0dim_structure_map",
+  "map_type": "static_reference_catalog",
+  "archive_scanned": false,
+  "limitations": "Catalog descriptions and token-energy proxies do not verify integrations, homology, model fidelity, or hardware bounds.",
   "epistemic_bounds": "1917HRS_CONVERGENCE_UPDATE",
   "stalks_Fv": [
     "forge-agent-system-prompt",
@@ -7,7 +9,6 @@
     "forge-agent-compact",
     "pi-forge-integration",
     "wormhole-sans-integration",
-    "wormhole-function-router",
     "atft-sheaf-consensus",
     "atft-falsification",
     "atft-vendored-sheaf-analysis",
@@ -28,6 +29,7 @@
     "analysis-dashboard-zero-forge-prompt",
     "analysis-dashboard-zero-forge-compact",
     "analysis-dashboard-zero-forge-tool-executor",
+    "wormhole-function-router",
     "wormhole-geodesic-search",
     "wormhole-term-series-engine",
     "wormhole-kim",
@@ -140,22 +142,113 @@
       "transducer-pulse",
       "ast-sheaf-scanner",
       "pulse calls scan_ast_to_rips_complex first (real AST geometry, no toy), then prune, then spectral (betti/gini), then L0_F on the pruned"
+    ],
+    [
+      "transducer-pulse",
+      "sheaf-condition-mcp",
+      "the mcp exposes the pulse for the agents (sheaf-guardian, the-anvil, night cycle, etc.)"
+    ],
+    [
+      "bipartite-harvester",
+      "qlora-distillation-stub",
+      "the harvested shape_pairs.jsonl is the dataset for the QLoRA Omega loop (\u0394\u03bb1 weighted to penalize disregard for topological coherence)"
+    ],
+    [
+      "topological-kv-governor",
+      "rlm-bridge",
+      "the governor + RLM for handling the massive archive context (6889 files in one dir, thousands of .py/.md/.json, full theory docs) during component analysis without OOM"
+    ],
+    [
+      "night-cycle-daemon",
+      "pre-tool-use-hook",
+      "the night cycle runs in L0 fibers, the hook gates any edits to the component code/prompts/presets/agents/mcp during the autonomous self-play"
+    ],
+    [
+      "sheaf-condition-mcp",
+      "local-llm-gguf-dozen",
+      "the mcp tools are called by the local LLMs (the 0-dim stalks) in the agent loop"
+    ],
+    [
+      "pi-forge-integration",
+      "sheaf-condition-mcp",
+      "the Pi harness can call the mcp tools (the transducer, harvester, governor, scanner, pulse) for topological component analysis"
+    ],
+    [
+      "wormhole-function-router",
+      "sheaf-condition-mcp",
+      "the WORMHOLE router can route intents to the mcp tools for the component analysis (e.g., 'analyze the integration of the Forge prompt with the transducer')"
+    ],
+    [
+      "analysis-dashboard-v1-mcp",
+      "analysis-dashboard-v2-mcp",
+      "shared forge tools (scan/test/gate/compare), but v2 has updated engine/scanner/gate for the topological pipeline"
+    ],
+    [
+      "analysis-dashboard-v1-skill-forge",
+      "analysis-dashboard-v2-skill",
+      "shared the-forge SKILL with NightForge/onboarding, but v2 has more integration with the transducer/pulse for coherence"
+    ],
+    [
+      "analysis-dashboard-v1-agents",
+      "sheaf-stack-the-scout",
+      "shared 'maps terrain' role, the-scout in sheaf-stack is the evolved version with forge_scan for DNA"
+    ],
+    [
+      "analysis-dashboard-v1-agents",
+      "sheaf-stack-the-anvil",
+      "shared 'tests everything' role, the-anvil in sheaf-stack is the evolved version with the 5-gate Anvil Test and binary gate"
+    ],
+    [
+      "analysis-dashboard-zero-forge-prompt",
+      "forge-agent-system-prompt",
+      "the canonical prompt with 7 Laws, used in the Zero dashboard and as the reference for the sheaf-stack Forge"
+    ],
+    [
+      "analysis-dashboard-zero-forge-tool-executor",
+      "sheaf-stack-mcp-server",
+      "the tool executor in Zero and the mcp in sheaf-stack both expose the forge tools for agent interop"
+    ],
+    [
+      "local-llm-gguf-dozen",
+      "lmstudio-forge-preset",
+      "the preset is the 'loading' of the local LLMs (Qwen coder etc.) with the Forge prompt and tools"
+    ],
+    [
+      "local-llm-gguf-dozen",
+      "qlora-distillation-stub",
+      "the local LLMs are the '0-dim stalks' that ingest the shape_pairs and get \u0394\u03bb1-weighted updates to become better at topological component analysis"
+    ],
+    [
+      "local-llm-gguf-dozen",
+      "night-cycle-daemon",
+      "the local LLMs are used as the 'stalks' in the autonomous self-play (different models for scanning, spectral, harvester, distillation)"
+    ],
+    [
+      "local-llm-gguf-dozen",
+      "sheaf-condition-mcp",
+      "the local LLMs call the mcp tools (the transducer for coherence, the harvester for pairs, the governor for context, the scanner for geometry)"
+    ],
+    [
+      "local-llm-gguf-dozen",
+      "pi-forge-integration",
+      "the local LLMs (via LM Studio) are the backend for the Pi Agent Harness and Forge CLI"
+    ],
+    [
+      "local-llm-gguf-dozen",
+      "wormhole-function-router",
+      "the local LLMs can be the 'transformation functions' routed by the WORMHOLE router for component analysis intents"
     ]
   ],
   "prune_info": {
-    "pruned_ratio": 0.5
+    "pruned_ratio": 1.0,
+    "method": "exact_duplicate_removal"
   },
   "coherence": {
-    "overall_energy": 4.88074616,
+    "assessment_type": "token_energy_proxy",
+    "overall_energy": 3.18699616,
     "overall_gini": 0.0,
     "overall_verdict": "OBSTRUCTED",
-    "hot_linkages": [
-      [
-        "ast-sheaf-scanner",
-        "discrete-morse-pruner",
-        "scan_ast_to_rips_complex builds the complex from AST, then prune_complex_to_critical for the reduced Morse boundary (Berkouk-Ginot isometry for \u03b2_k / H0 / H1 preservation)"
-      ]
-    ],
+    "hot_linkages": [],
     "recommended_coherent_integrations": [
       [
         "lmstudio-forge-preset",
@@ -183,14 +276,14 @@
         "finds valid solution pathways in the KIM with ContinuityGuard"
       ]
     ],
-    "note": "The component manifold shows high coherence on core laws/tools/prompts, potential obstructions on cross-integration (e.g., the Forge prompt tools not perfectly matching all mcp schemas in the dashboards, the night cycle not yet fully using the kv governor for the full C:\\CLAUDE2 archive context, the pi-integration showing the harness but not wired to the pre-tool-use hook or the harvester, the WORMHOLE closed-loop powerful but not yet using the harvester for positive pairs, the multiple Forge versions (v1/v2/Zero/sheaf-stack) not fully aligned with the transducer's pulse for coherence). The map enables the shift by making these visible and actionable via the harvester/distillation."
+    "note": "The component manifold shows high coherence on core laws/tools/prompts, potential obstructions on cross-integration (e.g., the Forge prompt tools not perfectly matching all mcp schemas in the dashboards, the night cycle not yet fully using the kv governor for the full archive archive context, the pi-integration showing the harness but not wired to the pre-tool-use hook or the harvester, the WORMHOLE closed-loop powerful but not yet using the harvester for positive pairs, the multiple Forge versions (v1/v2/Zero/sheaf-stack) not fully aligned with the transducer's pulse for coherence). The map enables the shift by making these visible and actionable via the harvester/distillation."
   },
   "how_to_inference_against": "Load this JSON as context for local LLMs. When asked to 'integrate these LLM components' or 'propose a new agent/skill/mcp for X', only propose integrations that would pass the pulse (low energy, low Gini on the component manifold). Use the hot linkages to identify brittle points to resolve via the harvester/distillation. Use the recommended coherent integrations to strengthen the manifold.",
   "local_hardware_implementation": {
     "hardware": "CPU-RAM-GPU with 6GB UMA (or 8-16GB as in the 70B extension), ability to poll and start sudo gitbash 2nd session",
     "local_llms": "the dozens of GGUF on disk as the 0-dim observation stalks in the map itself (different models for scanning, spectral, harvester, distillation, or as the 'stalks' being mapped)",
     "sudo_gitbash_sessions": "for isolated L0 fibers where the 'component mutation/resolution' experiments happen (the night cycle with target 'llm_component_analysis')",
-    "i_o_harness": "the mcp for hardware polling during long analysis, the kv governor + RLM for the massive C:\\CLAUDE2 context (6889 files in one dir, thousands of .py/.md/.json, full theory docs)",
+    "i_o_harness": "the mcp for hardware polling during long analysis, the kv governor + RLM for the massive archive context (6889 files in one dir, thousands of .py/.md/.json, full theory docs)",
     "the_map_as_truth": "the 1:1 true-to-life of coherent LLM component integration \u2013 the only value there ever was for the integrated system"
   },
   "order_of_magnitude_shift": "Instead of ad-hoc or manual integration of these powerful but loosely wired LLM components (the Forge prompts are great but not fully aligned with the transducer's pulse for coherence, the WORMHOLE closed-loop is powerful but not yet using the harvester for positive pairs, the night cycle is the orchestrator but not yet targeting the components themselves, the pi-integration shows the harness but not the full topological map, the multiple Forge versions in the dashboards are not unified), you have a living, pruneable, self-improving topological 'map' of the entire LLM component manifold that the local LLMs can 'inference against' to propose only coherent integrations, the night cycle can autonomously experiment with the wirings in isolated fibers using the local LLMs as the stalks, the harvester/distillation can improve the LLMs based on what integrations 'work' (positive \u0394\u03bb1), the kv/RLM/mcp/hook/hardware polling make it all runnable on the user's local setup without OOM or drift, the map is the 'truth' for the integrated system (the 'only value there ever was' is the coherent H0 composition of these components). This enables massive parallel local experimentation with component integrations, deterministic composition (only coherent H0 integrations 'exist' or are promoted), self-improving LLMs specialized for topological component analysis, hardware-optimized analysis of huge archives, and the map as the ground truth for what the integrated system 'should' be."

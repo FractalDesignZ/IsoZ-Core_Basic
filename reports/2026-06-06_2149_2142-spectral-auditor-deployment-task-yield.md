@@ -70,19 +70,25 @@ Stepped, actionable list (encoded for traceability). Apply these to align local 
 
 1. **Git History Rectification (Immediate — Push Blocker)**:
    - Run in authenticated terminal (your machine, with ZuluYokohama write access):
-     ```
+
+     ```bash
      cd C:\GrokBuild\plugin
      git status
      git log --oneline -5
      git push origin main
+
      ```
+
      (If "no merge base" or non-fast-forward: `git push --force-with-lease origin main` only after confirming remote state; coordinate with team to avoid losing remote history.)
    - Post-push verification:
-     ```
+
+     ```bash
      git fetch origin
      git log --oneline origin/main -3
      git diff --name-only origin/main...HEAD
+
      ```
+
    - Why: Remote currently at f6bbf1f... (pre-2142). Grok Heavy needs these diffs for parsing. This yields the "confirmation" requested in prior turns.
 
 2. **Diff Artifact Generation (for Oversight)**:
@@ -90,9 +96,12 @@ Stepped, actionable list (encoded for traceability). Apply these to align local 
      - `diffs/2026-06-06_2149_2142-spectral-auditor-vs-sheaf-guardian.patch` (compare new agent to existing).
      - `diffs/2026-06-06_2149_phase-lock-2142-update.diff`.
    - Command to generate:
-     ```
+
+     ```bash
      git diff origin/main...HEAD > diffs/2026-06-06_2149_full-2142-delta.patch
+
      ```
+
    - Tune: Review for any hot linkages (use `python scripts/sheaf_coderabbit.py agents/spectral-auditor.md --format markdown`).
 
 3. **Build Tune / Integration Components**:

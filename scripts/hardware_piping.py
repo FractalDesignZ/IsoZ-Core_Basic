@@ -15,6 +15,7 @@ actual ioSurface / NPU delegates and bypass traditional Von Neumann paths.
 
 from __future__ import annotations
 import json
+import textwrap
 from typing import Any, Dict, List, Optional
 
 
@@ -155,7 +156,7 @@ class LlamaCppTopologicalBridge:
 
     def __init__(self, cfg: LlamaCppBridgeConfig, governor: Optional["TopologicalKVGovernor"] = None):
         self.cfg = cfg
-        self.governor = governor or (TopologicalKVGovernor(vram_limit_gb=cfg.vram_limit_gb) if TopologicalKVGovernor else None)
+        self.governor = governor or (TopologicalKVGovernor(vram_limit_gb=cfg.vram_limit_gb, eviction_threshold_gb=cfg.eviction_threshold_gb) if TopologicalKVGovernor else None)
         self._llama_handle = None  # would be llama_cpp.Llama or a ctypes pointer
         self._backend_type = "stub"
         self._try_init_backend()
@@ -183,8 +184,8 @@ class LlamaCppTopologicalBridge:
         if self.cfg.model_path:
             # We don't actually exec here (would require the binary present);
             # we just record the intent. Real calls would use --prompt, --n-ctx etc.
-            self._backend_type = "subprocess-llama-cli"
-            print(f"[Node ν] Will drive llama.cpp via subprocess (expect custom fork with ternary shim)")
+            self._backend_type = "unavailable"
+            print("[Node ν] Requested model backend unavailable; subprocess integration is not implemented")
         else:
             self._backend_type = "stub"
             print("[Node ν] No model_path supplied — running in pure simulation mode (still exercises governor + ternary routing logic)")
@@ -207,11 +208,11 @@ class LlamaCppTopologicalBridge:
         # Project whatever is currently in the active context (the caller supplies
         # the token list; here we simulate a recent window).
         # Real integration: after every llama.cpp forward we extract the active
-        # tokens from the KV cache and hand them to project_tokens + evict_if_needed.
+        # tokens from the KV cache and hand them to govern.
         recent_tokens = [f"t{i}" for i in range(128)]  # placeholder
-        self.governor.project_tokens(recent_tokens)
-
-        result = self.governor.evict_if_needed(current_vram_gb=vram)
+        result = self.governor.govern(recent_tokens, current_vram_gb=vram)
+        result["kv_trim_applied"] = False
+        result["simulation"] = True
 
         # Now push the eviction decision into the llama.cpp backend.
         if result.get("evicted") and self._llama_handle is not None:
@@ -235,36 +236,31 @@ class LlamaCppTopologicalBridge:
 
         layers = gguf_map.get("layers", {})
         h0_energy = gguf_map.get("h0_maintainer_energy", 0.0)
-        print(f"[Node ν] Applying ternary GGUF map: {len(layers)} layers, H0 energy preserved={h0_energy:.4f}")
+        print(f"[Node ν] Inspecting map: {len(layers)} layers, proxy energy={h0_energy:.4f}; custom loader unsupported")
 
         # If we have a live llama handle we would set model tensor extra data
         # or call a custom C function exposed by the shim (ggml_ternary_load_map).
         return {
-            "applied": True,
+            "applied": False,
+            "status": "unsupported",
             "ternary_basis": gguf_map.get("ternary_basis"),
             "h0_maintainer_energy": h0_energy,
-            "note": "The 0-dim stalks now execute through the Ternary Crystal under the shim. Only ker L_F weights are high-precision.",
+            "note": "No custom shim loader is bound; the map has not been applied to a backend.",
         }
 
     def rlm_chunk_and_feed(self, huge_text: str, max_chunk: int = 2048) -> List[str]:
         """
         Recursive Environmental Context (RLM) style chunking so that the 70B
-        (or the massive C:\CLAUDE2 LLM-component archive) never forces a full
+        (or a large LLM-component archive) never forces a full
         dense context load. The governor still sees the semantic chunks.
         """
         # Very lightweight semantic chunker (history mentioned regex + recursive sub-calls).
         # Real version would be far more sophisticated (the analyzer already does
         # some of this for the map).
-        chunks = []
-        words = huge_text.split()
-        buf = []
-        for w in words:
-            buf.append(w)
-            if len(" ".join(buf)) > max_chunk:
-                chunks.append(" ".join(buf))
-                buf = [w]
-        if buf:
-            chunks.append(" ".join(buf))
+        if max_chunk < 1:
+            raise ValueError("max_chunk must be positive")
+        chunks = textwrap.wrap(huge_text, width=max_chunk, break_long_words=True,
+                               break_on_hyphens=False, replace_whitespace=True)
         print(f"[Node ν] RLM split into {len(chunks)} chunks (governor + ternary path still applies per chunk)")
         return chunks
 
@@ -274,7 +270,9 @@ class LlamaCppTopologicalBridge:
         In the custom fork this would ultimately call the ggml_ternary_* functions.
         """
         if gguf_map:
-            self.apply_ternary_gguf_map(gguf_map)
+            applied = self.apply_ternary_gguf_map(gguf_map)
+            if not applied["applied"]:
+                return {"status": "unsupported", "output": None, "map_application": applied, "backend": self._backend_type}
 
         gov_result = self.poll_hardware_and_govern()
 
@@ -284,16 +282,21 @@ class LlamaCppTopologicalBridge:
                 out = self._llama_handle.create_completion(prompt, max_tokens=64, temperature=0.0)
                 text = out["choices"][0]["text"] if out.get("choices") else ""
             except Exception as e:
-                text = f"[llama backend error: {e}]"
+                return {"status": "backend_error", "output": None, "error": str(e), "backend": self._backend_type}
+        elif self._backend_type == "unavailable":
+            return {"status": "backend_unavailable", "output": None, "backend": self._backend_type}
         else:
             text = f"[stub] ternary-routed completion for prompt len={len(prompt)} under 6GB UMA"
 
         return {
             "prompt": prompt[:128] + "..." if len(prompt) > 128 else prompt,
             "output": text,
+            "status": "simulation" if self._backend_type == "stub" else "completed",
             "governor": gov_result,
-            "ternary_routing": "0=Void(bypass), 1=Identity(scalar), 3=Prime(MMA) + CTNN copresheaf attention",
+            "ternary_routing": "unimplemented",
             "backend": self._backend_type,
+            "simulation": self._backend_type == "stub",
+            "ternary_routing_applied": False,
         }
 
 
@@ -310,7 +313,9 @@ def route_to_llama_backend(
     flush = sync_time_slice_flush()
     routed = bridge.route_ternary_forward(prompt_context or "topological global section", None)
     return {
-        "routed": True,
+        "routed": routed.get("status") == "completed",
+        "status": routed.get("status"),
+        "simulation": routed.get("simulation", False),
         "transport": "llama.cpp + ggml_ternary_shim (Ternary Crystal 0/1/3 + CTNN)",
         "sparse_payload_summary": sparse_section,
         "flush": flush,

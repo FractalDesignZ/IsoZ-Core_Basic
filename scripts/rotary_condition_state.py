@@ -16,6 +16,7 @@ When real hardware/math libs are present, replace the compute_* functions.
 """
 
 from __future__ import annotations
+import ast
 import math
 import re
 from dataclasses import dataclass, field
@@ -23,11 +24,11 @@ from typing import Any, Dict, List, Optional, Tuple
 
 try:
     from scripts.discrete_morse import prune_stalk_complex
-    from scripts.ast_sheaf_scanner import scan_ast_to_rips_complex
+    from scripts.ast_sheaf_scanner import scan_ast_to_rips_complex, extract_topological_features
     from scripts.oracle import harvest_geometry_resolution
 except ImportError:
     from discrete_morse import prune_stalk_complex
-    from ast_sheaf_scanner import scan_ast_to_rips_complex  # fallback
+    from ast_sheaf_scanner import scan_ast_to_rips_complex, extract_topological_features  # fallback
     from oracle import harvest_geometry_resolution
 
 # Simple stubs for vendored ATFT spectral tools (in full, import from atft.vendored)
@@ -166,8 +167,7 @@ class HybridConditionStateTransducer:
 
         # Very simplified quadratic form energy ~ x^T L x
         # Add self-degree penalty
-        self_energy = sum(d * sum(s.vector[k]**2 for k in range(self.dim)) for d, (_, s) in zip(deg, stalks.items()))
-        total_energy = (adj_energy + self_energy * 0.1) / max(1, n)
+        total_energy = adj_energy / max(1, n)
 
         # Kernel test (energy below threshold ≈ in kernel)
         is_kernel = total_energy < 1e-3
@@ -184,50 +184,48 @@ class HybridConditionStateTransducer:
         Main entry called by MCP / agent before emitting candidate output.
         Returns the condition state after this pulse.
 
-        Per the Epistemic Bounds spec:
-        - Use real AST scanner (discard toy embedding) to build Vietoris-Rips complex from code geometry.
-        - Prune with Discrete Morse (acyclic matchings) to critical cells.
-        - Extract spectral signatures (Betti curves, Gini trajectory) on the pruned Morse boundary.
-        - Compute L^0_F on the sparsified complex.
-        - Gini > 0.8 or energy > 0 indicates disorder / obstruction (high topological entropy).
-        This couples real AST to ATFT tools for phase transition detection before any edit.
+        AST dependencies form a graph with deterministic symbol embeddings.
+        Optional graph collapses are reported separately. The original graph
+        always supplies the energy gate because sheaf-energy preservation under
+        graph collapse has not been established. Betti/Gini curves are proxies.
         """
-        # 1. Scan and Prune using real AST (Node α)
+        # Build one artifact-local graph. Keep the original cochains for energy:
+        # graph collapses alone do not prove preservation of sheaf energy.
+        previous_energy = self.state.last_energy
+        previous_obstruction = self.state.last_obstruction
+        morse_boundary = None
+        critical_names = {}
         try:
-            pruned_complex, morse_boundary, critical_names = scan_ast_to_rips_complex(artifact)
-            # Use critical names as the 'stalks' for this pulse (real geometry)
-            pruned_stalk_count = sum(len(v) for v in critical_names.values()) if critical_names else 1
-            # For compatibility with existing state, create minimal stalks from critical names
-            new_stalks = {}
-            for dim, names in critical_names.items():
-                for name in names:
-                    vid = f"ast:{name}:{len(new_stalks)}"
-                    new_stalks[vid] = Stalk(node_id=vid, vector=[hash(name) % 10 / 10.0] * self.dim, metadata={"token": name, "dim": dim})
-            self.state.stalks = new_stalks  # replace with AST-derived for this evaluation
-            # Build simple edges from the pruned complex faces (restriction maps)
-            self.state.edges = []
-            for faces in pruned_complex.faces.values():
-                if len(faces) == 2:
-                    # map back approx
-                    self.state.edges.append((f"ast:node:{faces[0]}", f"ast:node:{faces[1]}"))
-        except Exception as e:
-            # Fallback to token if not valid code or parse fails
-            new_stalks = self.map_to_stalks(artifact, context)
-            self.state.stalks.update(new_stalks)
+            base_complex, _, id_to_name = extract_topological_features(ast.parse(artifact))
+            self.state.stalks = {
+                f"ast:{cid}": Stalk(f"ast:{cid}", self._embed(name), {"token": name})
+                for cid, name in id_to_name.items()
+            }
+            self.state.edges = [(f"ast:{faces[0]}", f"ast:{faces[1]}")
+                                for faces in base_complex.faces.values() if len(faces) == 2]
+            original_stalk_count = len(self.state.stalks)
+            original_edge_count = len(self.state.edges)
+            if apply_discrete_morse:
+                pruned_complex, morse_boundary, critical_names = scan_ast_to_rips_complex(artifact)
+                pruned_stalk_count = len(pruned_complex.vertices)
+            else:
+                pruned_stalk_count = original_stalk_count
+        except SyntaxError:
+            self.state.stalks = self.map_to_stalks(artifact, context)
             self.state.edges = self._build_edges(self.state.stalks)
-            pruned_complex = None
-            morse_boundary = None
-            critical_names = {}
-            pruned_stalk_count = len(self.state.stalks)
-
-        original_stalk_count = len(self.state.stalks)
-        original_edge_count = len(self.state.edges)
+            original_stalk_count = len(self.state.stalks)
+            original_edge_count = len(self.state.edges)
+            if apply_discrete_morse:
+                reduced, _, _ = prune_stalk_complex(self.state.stalks, self.state.edges)
+                pruned_stalk_count = len(reduced)
+            else:
+                pruned_stalk_count = original_stalk_count
 
         # 2. Extract Spectral Signatures on Critical Cells (Node β)
         betti_k = compute_betti_curves(morse_boundary) if morse_boundary is not None else {0: [1.0]}
         gini_curve = extract_gini_trajectory(betti_k)
 
-        # 3. Calculate Dirichlet Energy (L^0_F) on pruned
+        # 3. Calculate proxy Dirichlet energy on the original dependency graph
         energy, in_kernel, obstruction, edge_energies = self.compute_sheaf_laplacian_energy(
             self.state.stalks, self.state.edges
         )
@@ -239,15 +237,16 @@ class HybridConditionStateTransducer:
         self.state.pulse_count += 1
 
         # Simulate topological coherence shift (Δλ₁)
-        self.state.delta_lambda = (energy * 0.3) + (0.01 * (self.state.pulse_count % 7))
+        self.state.delta_lambda = previous_energy - energy
 
         # Gini -> 1 indicates topological entropy/disorder
         verdict = "CONSISTENT"
-        if energy > 0.0 or gini_curve > 0.8:
+        if not in_kernel or gini_curve > 0.8:
             verdict = "OBSTRUCTED"
             if not obstruction:
                 obstruction = f"H^1 Knot or High Entropy (Gini={gini_curve:.2f})"
 
+        self.state.last_obstruction = obstruction
         result = {
             "energy": round(energy, 8),
             "kernel_member": in_kernel,
@@ -256,22 +255,24 @@ class HybridConditionStateTransducer:
             "pulse_count": self.state.pulse_count,
             "stalk_count": len(self.state.stalks),
             "edge_count": len(self.state.edges),
-            "hot_linkages": dict(sorted(edge_energies.items(), key=lambda x: x[1], reverse=True)[:5]),
+            "hot_linkages": self._json_linkages(edge_energies),
             "verdict": verdict,
             "gini_curve": round(gini_curve, 4),
             "betti_0": betti_k.get(0, []),
             # Epistemic Bounds sparsification metadata
-            "sparsification_applied": morse_boundary is not None,
+            "sparsification_applied": apply_discrete_morse,
+            "energy_graph": "original",
+            "homology_preservation": "not_checked",
             "original_stalk_count": original_stalk_count,
             "original_edge_count": original_edge_count,
             "pruned_stalk_count": pruned_stalk_count,
-            "sparsification_ratio": round(pruned_stalk_count / max(1, original_stalk_count), 4) if 'pruned_stalk_count' in locals() else 1.0,
+            "sparsification_ratio": round(pruned_stalk_count / original_stalk_count, 4) if original_stalk_count else 1.0,
             "morse_boundary_shape": list(morse_boundary.shape) if morse_boundary is not None and hasattr(morse_boundary, 'shape') else None,
         }
 
         # Geometry Harvester (Bipartite Router) integration for positive coherence shifts during L0->L3 flow
-        if in_kernel and self.state.delta_lambda > 0:
-            pre_obstruction = {"energy": "previous", "obstruction": self.state.last_obstruction} if self.state.last_obstruction else None
+        if verdict == "CONSISTENT" and in_kernel and self.state.delta_lambda > 0:
+            pre_obstruction = {"energy": previous_energy, "obstruction": previous_obstruction}
             post_resolution = {
                 "verdict": verdict,
                 "energy": energy,
@@ -291,6 +292,11 @@ class HybridConditionStateTransducer:
         # In real system: derived from the smallest positive eigenvalue of L or filtration value
         return max(0.01, 0.25 - (self.state.last_energy * 10))
 
+    @staticmethod
+    def _json_linkages(energies):
+        return [{"source": u, "target": v, "energy": energy}
+                for (u, v), energy in sorted(energies.items(), key=lambda x: x[1], reverse=True)[:5]]
+
     def get_state(self) -> Dict[str, Any]:
         return {
             "stalk_count": len(self.state.stalks),
@@ -302,7 +308,7 @@ class HybridConditionStateTransducer:
             "consistency_radius": self.ComputeConsistencyRadius(),
             "linkages": {
                 "total_edges": len(self.state.edges),
-                "hot_linkages": dict(sorted(self.state.edge_energies.items(), key=lambda x: x[1], reverse=True)[:5]) if hasattr(self.state, 'edge_energies') else {},
+                "hot_linkages": self._json_linkages(self.state.edge_energies),
             },
             "infiltrated_truth": getattr(self.state, 'infiltrated_truth', []),
         }
@@ -327,7 +333,7 @@ def read_state() -> Dict[str, Any]:
     # Inject linkage details for CodeRabbit-style review / streamlining
     state["linkages"] = {
         "edge_count": len(TRANSDUCER.state.edges),
-        "hot_linkages": getattr(TRANSDUCER.state, 'edge_energies', {}),
+        "hot_linkages": TRANSDUCER._json_linkages(TRANSDUCER.state.edge_energies),
     }
     state["infiltrated_truth_count"] = len(getattr(TRANSDUCER.state, 'infiltrated_truth', []))
     return state

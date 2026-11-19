@@ -1,5 +1,13 @@
 # specialized-agents
 
+> Runtime status (2026-11-19): this repository is an experimental simulation.
+> Graph free-face collapses preserve graph topology; preservation of sheaf energy
+> is not established, so the gate evaluates the original dependency graph.
+> Betti/Gini trajectories remain proxies. The quantizer uses dense matrices and
+> does not verify a 6GB bound or model fidelity. The C++ shim provides a CPU F32
+> reference forward; its JSON map loader and custom llama.cpp integration return
+> unsupported. Historical deployment reports are not evidence of working hardware.
+
 Grok Build plugin that delivers **custom agent types with unique mathematical verification features**.
 
 **Flagship agent type: `sheaf-guardian`**
@@ -88,6 +96,7 @@ It is explicitly built around the **best maneuver space** for this kind of work:
 This lets you (or an agent) **infiltrate** verified facts and **streamline** the actual linkages in the code at exactly the right points (function boundaries, call sites, symbol definitions — the natural infil/exfil boundaries of the program).
 
 Run it directly:
+
 ```bash
 python scripts/sheaf_coderabbit.py src/core.py
 ```
@@ -106,6 +115,7 @@ This is the correction of the illustrative "wellbore/BHA Excel modernization" ex
 - The map + harvested shape_pairs become the "truth" the local LLMs inference against for only coherent integrations.
 
 Run (corrected target):
+
 ```bash
 python scripts/night_cycle_daemon.py --cycles 1 --parallel 2 --batch 5 --target llm_component
 ```
@@ -129,16 +139,15 @@ Three new artifacts implement the split (Python pre-processing + C++ execution):
 
 2. **Node μ — `src/ggml_ternary_shim.cpp`**
    - Draft C++ for injection into a llama.cpp fork.
-   - `ggml_ternary_mul_mat`: intercepts the core matmul, drops 0-Void weights with zero DRAM read, routes 1 via cheapest scalar path, 3 straight to Tensor Core / MMA / AMX.
-   - `ggml_copresheaf_attention` + `ggml_copresheaf_*`: dismantles O(N²) attention into copresheaf transport maps + selective SSM (Mamba-style) whose parameters are sheaf sections.
-   - Loader helper that ingests the .ggufmap from λ.
-   - Governor bind + H0 energy reporting hooks back to the Python side.
-   - Zero-bypass: any non-H0 path was already forbidden by the quantizer + hook.
+   - `ggml_ternary_compute_forward`: CPU F32 reference over ggml dimensions `[K,M] × [K,N] → [M,N]`. Pass `ggml_ternary_parameters` from the companion header and check its integer status.
+   - Code 0 skips a weight; codes 1 and 3 use its original signed value. An explicit maintainer slice retains every weight.
+   - `ggml_ternary_load_map` clears output parameters and returns `GGML_TERNARY_UNSUPPORTED`; JSON map loading, CTNN attention, accelerator dispatch and governor binding are not implemented.
+   - The shim requires the target fork's `ggml.h` and has not been registered as an operator in llama.cpp.
 
 3. **Node ν — `scripts/hardware_piping.py` (extended)**
    - `LlamaCppTopologicalBridge`: owns the connection (llama-cpp-python, subprocess to custom binary, or stub).
-   - `poll_hardware_and_govern()`: calls the existing `TopologicalKVGovernor` (L_F projection, H0_Maintainers locked, Low_Energy_Sacrificial min-heap eviction) and pushes real KV cache trims into llama.cpp.
-   - `apply_ternary_gguf_map()`: feeds λ output into the μ shim.
+   - `poll_hardware_and_govern()`: calls the governor simulation and reports `kv_trim_applied: false`; no real backend KV cache is trimmed.
+   - `apply_ternary_gguf_map()`: returns `applied: false` with an unsupported status until a custom loader is bound.
    - `rlm_chunk_and_feed()`: Recursive Environmental Context chunking so massive contexts (C:\CLAUDE2 archive or 70B-scale) never force dense loads.
    - `route_ternary_forward()` + upgraded `route_to_llama_backend` / `enforce_output_constraints_with_llama`.
    - Full λ-μ-ν demo in `__main__`.
@@ -146,16 +155,17 @@ Three new artifacts implement the split (Python pre-processing + C++ execution):
 All three artifacts reference the full prior contract (prune before L0_F, only ker L^0_F ever promoted, Berkouk-Ginot preservation, Gini gate, A4 hook, 0-dim stalks from the geometric map, 6GB UMA envelope, Ternary Crystal, CTNN copresheaf, RLM, night-cycle evolution of the routes themselves).
 
 Run the chain:
+
 ```bash
-python scripts/sheaf_svd_quantizer.py --model synthetic --hidden 512 --layers 2 --output config/ternary_70b_ggufmap.json
+python scripts/sheaf_svd_quantizer.py --model synthetic --hidden 32 --layers 1 --output config/ternary_70b_ggufmap.json
 python scripts/hardware_piping.py   # exercises ν + governor + map application
 ```
 
-The 0-dim stalks now have physical bare-metal execution routes. The map is generating the territory at the silicon level.
+The chain currently produces an experimental map and simulation receipts. Physical backend routing remains unimplemented.
 
 ## Plugin Contents
 
-```
+```text
 specialized-agents/
 ├── .claude-plugin/
 │   └── plugin.json
@@ -198,7 +208,7 @@ print(read_state())
 
 ## Requirements for full fidelity (optional)
 
-The current implementation is pure-Python and self-contained (no heavy deps required to start using the agent type).
+The graph and quantizer modules require NumPy and SciPy. Install the dependencies with `python -m pip install -r requirements.txt`; use `pytest` for the regression suite. FastMCP and safetensors are optional for their corresponding integrations.
 
 For production-grade spectral work you would add:
 
@@ -245,6 +255,7 @@ You can keep your normal parent agent on Grok (or any model) while routing only 
 - Always verify that the MCP tool calls appear in the transcript — if the model skips `rotate_condition`, the isomorphism guarantee is lost.
 
 ### Launching with Gemini
+
 ```bash
 # Entire session on Gemini
 grok --model gemini-2.5-pro
@@ -262,19 +273,13 @@ The mathematical core (sheaf theory, condition state, sparse routing) remains id
 - Integration with real Lean proofs for critical kernels
 - First-class Gemini-optimized agent variant (if needed beyond the current cross-model prompt)
 
-## Roadmap / Future Agents in this plugin
-
-- `spectral-auditor` — deeper homology + persistent features for whole-codebase audits
-- `topo-refactor` — a more aggressive (but still gated) editing agent that can apply approved sparse deltas
-- Integration with real Lean proofs for critical kernels
-
 ## License
 
 This project is licensed under the [PolyForm Noncommercial License 1.0.0](LICENSE). Commercial use requires a separate license from the copyright holder, B. Jones (b.jones@jtech.ai). See [NOTICE](NOTICE). Versions published before 2026-10-16 were released under the MIT License, and those versions keep it.
 
 ---
 
-## Formal Epistemic Bounds — 1917HRS Convergence Update
+## Historical design goals — 1917HRS Convergence Update
 
 **Define Epistemic Bounds**
 
@@ -331,7 +336,7 @@ When using the `sheaf-guardian` + `sheaf_coderabbit` + AST/Morse pipeline for ch
 
 **Example PR Description (generated via `sheaf_coderabbit --format markdown` or Forge pipeline in Epistemic Bounds mode):**
 
-```
+```text
 ## Homological Validation Report (Epistemic Bounds - A4 Gate Passed)
 
 **Artifact:** [path/to/changed.py]

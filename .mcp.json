@@ -15,11 +15,12 @@
     "command": "npx",
     "args": [
       "-y",
-      "@modelcontextprotocol/server-github"
+      "@modelcontextprotocol/server-github@2025.4.8"
     ],
     "env": {
       "GITHUB_PERSONAL_ACCESS_TOKEN": "${GITHUB_TOKEN}"
     },
-    "description": "GitHub MCP server for direct PR creation, branch management, issue tracking, and review comments. Critical for closing the 'no pr as stated' visibility gap and allowing the harness (meta-skill-creator, harness-backlog-reviewer) to autonomously surface task-yield reports and coderabbit findings as real PRs."
+    "description": "GitHub MCP server for direct PR creation, branch management, issue tracking, and review comments. Critical for closing the 'no pr as stated' visibility gap and allowing the harness (meta-skill-creator, harness-backlog-reviewer) to autonomously surface task-yield reports and coderabbit findings as real PRs.",
+    "type": "stdio"
   }
 }

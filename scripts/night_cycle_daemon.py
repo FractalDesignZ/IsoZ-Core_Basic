@@ -29,59 +29,50 @@ from qlora_distillation_stub import qlora_distillation_stub
 from topological_kv_governor import TopologicalKVGovernor
 from ast_sheaf_scanner import scan_ast_to_rips_complex
 
-L0_ROOT = Path(r'C:\CLAUDE2')
-WORKTREES_DIR = L0_ROOT / 'worktrees'
-SHAPE_PAIRS = Path('shape_pairs.jsonl')
+REPO_ROOT = Path(__file__).resolve().parents[1]
+L0_ROOT = Path(os.environ.get("SHEAF_REPO_ROOT", str(REPO_ROOT))).resolve()
+WORKTREES_DIR = L0_ROOT / "worktrees"
+SHAPE_PAIRS = REPO_ROOT / "shape_pairs.jsonl"
 BATCH_SIZE = 100
 PARALLEL = 12
 
-transducer = HybridConditionStateTransducer(dim=8)
-kv_governor = TopologicalKVGovernor(transducer=transducer)
 
-def chaos_monkey_intent_injector(worktree: Path) -> List[str]:
-    """Introduce bugs (entropy) e.g. inconsistent logic to raise energy/Gini."""
-    mutated = []
-    for pyf in list(worktree.rglob('*.py'))[:3]:
-        try:
-            txt = pyf.read_text(encoding='utf-8', errors='ignore')
-            if 'def ' in txt:
-                # Introduce entropy: change to cause inconsistency
-                txt = txt.replace('return ', 'return "CHAOS" + str(', 1) + ')' if 'return ' in txt else txt + '\n# CHAOS entropy added\n'
-                pyf.write_text(txt, encoding='utf-8')
-                mutated.append(str(pyf))
-        except:
-            pass
-    return mutated
+def chaos_monkey_intent_injector(worktree: Path) -> Dict[str, bytes]:
+    """Record exact originals before adding a reversible simulation marker."""
+    originals = {}
+    for target in sorted(worktree.rglob("*.py"))[:3]:
+        original = target.read_bytes()
+        originals[str(target)] = original
+        target.write_bytes(original + b"\n# SHEAF_SIMULATED_MUTATION\n")
+    return originals
 
-def dispatch_sheaf_guardian(worktree: Path, context: str = 'night-cycle') -> Dict[str, Any]:
-    """Simulate dispatching sheaf-guardian: scan, pulse on buggy, 'resolve' by cleaning, re-pulse."""
-    pys = list(worktree.rglob('*.py'))
-    if not pys:
-        return {'verdict': 'NO_CODE', 'energy': 1.0}
-    target = random.choice(pys)
-    try:
-        art = target.read_text(encoding='utf-8', errors='ignore')
-    except:
-        return {'verdict': 'READ_FAIL', 'energy': 1.0}
-    
-    pre = transducer.pulse_mid_activity_evaluation(art, context, apply_discrete_morse=True)
-    
-    # Simulate resolution: remove chaos markers
-    fixed = art.replace('CHAOS', '').replace('"CHAOS" + str(', '').rstrip(')')
-    post = transducer.pulse_mid_activity_evaluation(fixed, context+'-resolved', apply_discrete_morse=True)
-    
-    success = post['verdict'] == 'CONSISTENT' and post.get('energy', 1) < 0.1
-    if success:
-        target.write_text(fixed, encoding='utf-8')  # apply fix (upward flow sim)
-    
-    return {
-        'verdict': post['verdict'],
-        'energy': post.get('energy'),
-        'pre_energy': pre.get('energy'),
-        'success': success,
-        'target': str(target),
-        'delta_lambda': post.get('delta_lambda', 0) - pre.get('delta_lambda', 0)
-    }
+
+def dispatch_sheaf_guardian(worktree: Path, context: str = "night-cycle", originals=None,
+                            transducer=None) -> Dict[str, Any]:
+    """Evaluate and restore only known simulation mutations, byte for byte."""
+    transducer = transducer or HybridConditionStateTransducer(dim=8)
+    originals = originals or {}
+    if not originals:
+        return {"verdict": "NO_MUTATION", "energy": 0.0, "success": False}
+    target = Path(next(iter(originals)))
+    root = worktree.resolve()
+    if not target.resolve().is_relative_to(root):
+        raise ValueError("Mutation target is outside its worktree")
+    artifact = target.read_text(encoding="utf-8")
+    pre = transducer.pulse_mid_activity_evaluation(artifact, context)
+    original = originals[str(target)]
+    post = transducer.pulse_mid_activity_evaluation(original.decode("utf-8"), context + "-restored")
+    for filename, contents in originals.items():
+        path = Path(filename)
+        if not path.resolve().is_relative_to(root):
+            raise ValueError("Mutation target is outside its worktree")
+        path.write_bytes(contents)
+    delta = pre["energy"] - post["energy"]
+    return {"verdict": post["verdict"], "energy": post["energy"], "pre_energy": pre["energy"],
+            "success": post["verdict"] == "CONSISTENT" and delta > 0,
+            "target": target.relative_to(worktree).as_posix(), "delta_lambda": delta,
+            "simulation": True, "note": "Known mutation restored; no autonomous semantic repair is implemented."}
+
 
 def inject_llm_component_violations(wt: Path) -> List[str]:
     """Inject component sync violations for LLM COMPONENT ANALYSIS FOR INTEGRATION target.
@@ -132,7 +123,7 @@ def describe_transformer_as_stalk():
     (vdir / "uma_70b_dense_claim.py").write_text('''#!/usr/bin/env python3
 """VIOLATION: claims full 70B dense load possible in 6GB UMA without sparsification.
 Correct per Epistemic Bounds / 70B spec: Asymmetric Mixed-Precision + SheafLaplacian + SVD for 18% H0 preservation at Q8_0/F16 + QPEFT/SRR;
-Ternary Crystal {0 Void, 1 Identity, 3 Prime (MMA)}; copresheaf topological NN; topological_kv_governor L_F eviction + RLM for C:\CLAUDE2 6889-file context;
+Ternary Crystal {0 Void, 1 Identity, 3 Prime (MMA)}; copresheaf topological NN; topological_kv_governor L_F eviction + RLM for archive 6889-file context;
 only sparse csr, prune before any L0_F, H0_Maintainers locked.
 """
 def can_load_70b_dense_in_6gb():
@@ -161,84 +152,69 @@ This is exactly the hot linkage the swarm (with target=llm_component) is meant t
     return created
 
 
+def create_worktree(repo_root: Path, worktree: Path):
+    """Fail before any worker activity if git cannot create a real checkout."""
+    subprocess.run(["git", "worktree", "add", "--detach", str(worktree), "HEAD"],
+                   cwd=str(repo_root), check=True, capture_output=True, text=True)
+
+
 def run_night_cycle(cycles: int = 3, parallel: int = PARALLEL, batch: int = BATCH_SIZE, target: str = "llm_component"):
-    print(f'[NightCycle] Starting Wormhole-Path 3: {cycles} cycles, {parallel} parallel L0 worktrees, target={target}')
-    print('  PRIMARY TARGET: LLM COMPONENT ANALYSIS FOR INTEGRATION (local GGUF as 0-dim stalks, archive prompts/presets/mcp/agents/skills/engines + Epistemic Bounds components as the geometric prime manifold).')
-    print('  (wellbore/BHA was an illustrative example of a "massive high-density target"; corrected per directive.)')
+    from concurrent.futures import ThreadPoolExecutor
+    from tempfile import mkdtemp
+    if min(cycles, parallel, batch) < 1:
+        raise ValueError("cycles, parallel, batch must be positive")
+    if target not in {"llm_component", "wellbore", "wellbore_example"}:
+        raise ValueError("Unknown target")
     WORKTREES_DIR.mkdir(parents=True, exist_ok=True)
     harvested = 0
-    # Target lock
-    legacy_target = Path("legacy_wellbore") if target == "wellbore" else None
-    is_llm = (target == "llm_component")
-    for c in range(cycles):
-        print(f'  Cycle {c+1}/{cycles}')
-        ts = []
-        wts = []
-        for i in range(parallel):
-            wt_name = f'L0-night-{c}-{i}'
-            wt_path = WORKTREES_DIR / wt_name
-            if wt_path.exists():
-                shutil.rmtree(wt_path, ignore_errors=True)
-            # Spawn (in real: sudo git-bash -c "git worktree add ...")
-            cmd = f'git worktree add -b {wt_name} {wt_path} main'
-            try:
-                subprocess.run(cmd, cwd=str(L0_ROOT), shell=True, check=True, capture_output=True)
-                print(f'    Spawned L0 {wt_name}')
-            except Exception as e:
-                wt_path.mkdir(parents=True, exist_ok=True)
-            wts.append(wt_path)
-            
-            def worker(wt=wt_path, tname=target):
-                # Always run chaos (mutates violation files + any other .py in the fiber)
-                mutated = chaos_monkey_intent_injector(wt)
-                if tname == "wellbore" and legacy_target and legacy_target.exists():
-                    # Acquire wellbore target into fiber (kept for the historical illustrative example)
-                    shutil.copytree(legacy_target, wt / "legacy_wellbore", dirs_exist_ok=True)
-                    (wt / "db_schema.py").write_text("class WellboreBHA:\\n    casing = '9-5/8'\\n    ohio_shale_pressure = 'high'\\n    # modern relational expected")
-                    (wt / "ui_component.tsx").write_text("const BHAReport = () => <div>legacy flat excel</div>; // desynced from schema")
-                    print(f'    Wellbore target acquired in {wt.name}, state-sync violation injected. (Note: illustrative pivot; primary is llm_component)')
-                    pre = {'energy': 0.5, 'obstruction': f'state-sync violation in wellbore {mutated}'}
-                elif tname == "llm_component":
-                    violations = inject_llm_component_violations(wt)
-                    print(f'    LLM component target acquired in {wt.name}, component sync violations injected (heuristic stalk vs AST; model arch vs geometric 0-dim + copresheaf/ternary; 70B dense vs UMA/KV/RLM/CTNN; WORMHOLE/pi/Forge versions hot linkages not yet to harvester/transducer).')
-                    pre = {'energy': 0.6, 'obstruction': f'LLM component sync violation in {violations}'}
-                else:
-                    pre = {'energy': 0.5, 'obstruction': 'generic entropy'}
-                res = dispatch_sheaf_guardian(wt)
-                print(f'      Resolve {wt.name}: {res["verdict"]} energy={res.get("energy",0):.4f}')
-                if res.get('success'):
-                    nonlocal harvested
-                    harvested += 1
-                    d = res.get('delta_lambda', 0.1)
-                    h = harvest_geometry_resolution(pre, res, d, [res['target']])
-                    print(f'        Harvested Δλ1={d:.4f}')
-                    # KV gov (exercises the 6GB UMA bound + L_F projection for the massive LLM component context)
-                    toks = ['def','main','(x',')','return','42', 'stalk', 'gguf', 'mamba', 'moe', 'ternary', 'copresheaf', 'L0_F', 'prune', 'harvester'] * 80
-                    g = kv_governor.govern(toks, current_vram_gb=5.7)
-                    print(f'        KV: evicted {len(g.get("evicted",[]))} (H0 maintainers locked, Low_Energy_Sacrificial at ceiling)')
-            t = threading.Thread(target=worker)
-            t.start()
-            ts.append(t)
-        for t in ts:
-            t.join()
-        print(f'    Cycle done. Total harvested: {harvested}')
-        if harvested >= batch:
-            print('  Batch reached! Closing Omega Loop: QLoRA...')
-            print('    Unloading inference...')
-            time.sleep(0.5)
-            qlora_distillation_stub(str(SHAPE_PAIRS), 'local-llm.gguf')
-            print('    Δλ1-weighted update applied, new weights compiled, inference rebooted with evolved consciousness.')
-            harvested = 0
-            kv_governor.token_map.clear()
-            kv_governor.token_heap = []
-    print('Night Cycle complete. Worktrees in', WORKTREES_DIR)
 
-if __name__ == '__main__':
+    def worker(worktree):
+        transducer = HybridConditionStateTransducer(dim=8)
+        governor = TopologicalKVGovernor(transducer=transducer)
+        if target == "llm_component": inject_llm_component_violations(worktree)
+        originals = chaos_monkey_intent_injector(worktree)
+        result = dispatch_sheaf_guardian(worktree, originals=originals, transducer=transducer)
+        result["governor"] = governor.govern(["simulation", "context"], current_vram_gb=5.7)
+        return result
+
+    for cycle in range(cycles):
+        created = []
+        try:
+            for index in range(parallel):
+                path = Path(mkdtemp(prefix=f"L0-night-{cycle}-{index}-", dir=WORKTREES_DIR))
+                try:
+                    create_worktree(L0_ROOT, path)
+                except Exception:
+                    path.rmdir()  # only this just-created, empty directory
+                    raise
+                created.append(path)
+            with ThreadPoolExecutor(max_workers=parallel) as pool:
+                # Consume results on one thread; worker exceptions propagate.
+                for result in pool.map(worker, created):
+                    if result.get("success") and result["delta_lambda"] > 0:
+                        receipt = harvest_geometry_resolution(
+                            {"energy": result["pre_energy"]}, result,
+                            result["delta_lambda"], [result["target"]])
+                        if receipt.get("action") == "geometry_harvested": harvested += 1
+            if harvested >= batch:
+                # The distillation implementation is a stub, so preserve its
+                # actual receipt instead of reporting that weights changed.
+                receipt = qlora_distillation_stub(str(SHAPE_PAIRS), "local-llm.gguf")
+                print({"distillation": receipt, "simulation": True})
+                harvested = 0
+        finally:
+            for path in created:
+                subprocess.run(["git", "worktree", "remove", "--force", str(path)],
+                               cwd=str(L0_ROOT), check=True, capture_output=True, text=True)
+    return {"harvested": harvested, "simulation": True}
+
+
+if __name__ == "__main__":
     import argparse
-    ap = argparse.ArgumentParser(description="Night Cycle autonomous swarm. Primary target: LLM COMPONENT ANALYSIS FOR INTEGRATION (0-dim stalks from local GGUF + archive LLM components).")
-    ap.add_argument('--cycles', type=int, default=1)
-    ap.add_argument('--parallel', type=int, default=2)
-    ap.add_argument('--batch', type=int, default=5)
-    ap.add_argument('--target', default='llm_component', choices=['llm_component', 'wellbore', 'wellbore_example'], help="Primary: llm_component (correct target per directive). 'wellbore' kept only as historical illustrative example of a high-density target.")
-    a = ap.parse_args()
-    run_night_cycle(a.cycles, a.parallel, a.batch, target=a.target)
+    parser = argparse.ArgumentParser(description="Isolated simulation of reversible mutations; no model training")
+    parser.add_argument("--cycles", type=int, default=1)
+    parser.add_argument("--parallel", type=int, default=2)
+    parser.add_argument("--batch", type=int, default=5)
+    parser.add_argument("--target", default="llm_component", choices=["llm_component", "wellbore", "wellbore_example"])
+    args = parser.parse_args()
+    print(run_night_cycle(args.cycles, args.parallel, args.batch, args.target))

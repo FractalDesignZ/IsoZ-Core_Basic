@@ -1,10 +1,10 @@
 """
 Discrete Morse Theory for Exact Sparsification.
 
-Implements discrete gradient fields and acyclic matchings (per Berkouk-Ginot isometry for preservation of topological invariants).
+Implements conservative elementary collapses for one-dimensional graphs.
 
 Used to prune Vietoris-Rips / AST-derived simplicial complexes before Sheaf Laplacian computation,
-to fit within 6GB UMA edge constraints while preserving Betti numbers, H^0 global sections, and H^1 obstructions.
+Graph homology is preserved by free-face collapses. Sheaf energy preservation is not established.
 
 This fulfills Node α/β of the Epistemic Bounds for Oracle-speed on pruned critical cells.
 """
@@ -29,7 +29,7 @@ class DiscreteVectorField:
     matching: Dict[int, int] = field(default_factory=dict)
     reverse: Dict[int, int] = field(default_factory=dict)
 
-def build_from_stalks_and_edges(stalks: Dict[str, dict], edges: List[Tuple[str, str]]) -> SimplicialComplex:
+def build_from_stalks_and_edges(stalks: Dict[str, dict], edges: List[Tuple[str, str]]) -> Tuple[SimplicialComplex, Dict[str, int]]:
     """Build a 1-complex from stalks (0-cells) and edges (1-cells)."""
     complex = SimplicialComplex()
     id_map = {sid: i for i, sid in enumerate(stalks.keys())}
@@ -37,34 +37,39 @@ def build_from_stalks_and_edges(stalks: Dict[str, dict], edges: List[Tuple[str, 
     complex.cells[0] = list(range(len(stalks)))
     for u, v in edges:
         if u in id_map and v in id_map:
-            eid = 1000 + len(complex.faces)
+            eid = len(stalks) + len(complex.faces)
             complex.cells.setdefault(1, []).append(eid)
             complex.faces[eid] = [id_map[u], id_map[v]]
     complex.dim = 1 if complex.cells.get(1) else 0
     return complex, id_map
 
 def compute_discrete_gradient(complex: SimplicialComplex, filtration: Optional[np.ndarray] = None) -> DiscreteVectorField:
-    """Greedy discrete gradient vector field."""
-    vf = DiscreteVectorField()
-    used_lower: Set[int] = set()
-    used_upper: Set[int] = set()
-    cofaces: Dict[int, List[int]] = {}
-    for upper, lowers in complex.faces.items():
-        for low in lowers:
-            cofaces.setdefault(low, []).append(upper)
+    """Match only free vertex/edge pairs in a graph.
 
-    for dim in range(complex.dim):
-        for low in complex.cells.get(dim, []):
-            if low in used_lower:
-                continue
-            candidates = [c for c in cofaces.get(low, []) if c not in used_upper]
-            if candidates:
-                upper = min(candidates)  # or use filtration if provided
-                vf.matching[low] = upper
-                vf.reverse[upper] = low
-                used_lower.add(low)
-                used_upper.add(upper)
+    Removing a degree-one vertex and its sole edge is an elementary collapse.
+    Recompute degrees after every collapse; cyclic cores are left intact.
+    Higher dimensional inputs are left unchanged until signed V-path transport
+    is implemented.
+    """
+    vf = DiscreteVectorField()
+    if complex.dim > 1:
+        return vf
+    remaining = {eid: list(complex.faces[eid]) for eid in complex.cells.get(1, [])}
+    while True:
+        cofaces = {}
+        for eid, vertices in remaining.items():
+            if len(vertices) == 2:
+                for vertex in vertices:
+                    cofaces.setdefault(vertex, []).append(eid)
+        free = next(((v, es[0]) for v, es in sorted(cofaces.items()) if len(es) == 1), None)
+        if free is None:
+            break
+        vertex, edge = free
+        vf.matching[vertex] = edge
+        vf.reverse[edge] = vertex
+        del remaining[edge]
     return vf
+
 
 def extract_critical_cells(complex: SimplicialComplex, vf: DiscreteVectorField) -> Dict[int, List[int]]:
     critical: Dict[int, List[int]] = {}
@@ -75,27 +80,27 @@ def extract_critical_cells(complex: SimplicialComplex, vf: DiscreteVectorField) 
     return critical
 
 def build_morse_complex(complex: SimplicialComplex, vf: DiscreteVectorField, critical: Dict[int, List[int]]) -> Tuple[SimplicialComplex, sparse.csr_matrix]:
-    """Build reduced Morse complex and sparse boundary (simplified for demo)."""
+    """Build the residual graph and its actual oriented incidence boundary."""
     morse = SimplicialComplex()
-    morse.vertices = critical.get(0, [])
-    morse.cells = {d: cs for d, cs in critical.items()}
-    morse.dim = max(morse.cells.keys()) if morse.cells else 0
-
-    all_crit = []
-    for d in sorted(morse.cells):
-        all_crit.extend(morse.cells[d])
-    n = len(all_crit)
+    morse.vertices = list(critical.get(0, []))
+    morse.cells = {d: list(cs) for d, cs in critical.items()}
+    morse.dim = max(morse.cells, default=0)
+    morse.faces = {cell: list(complex.faces[cell]) for cells in morse.cells.values()
+                   for cell in cells if cell in complex.faces}
+    all_cells = [cell for dim in sorted(morse.cells) for cell in morse.cells[dim]]
+    indices = {cell: i for i, cell in enumerate(all_cells)}
     rows, cols, data = [], [], []
-    # Placeholder sparse incidence (real impl follows V-paths for signed boundaries)
-    for i in range(min(n-1, 50)):
-        rows.append(i)
-        cols.append(i+1)
-        data.append(1.0)
-    boundary = sparse.csr_matrix((data, (rows, cols)), shape=(n, n)) if n > 0 else sparse.csr_matrix((0, 0))
+    for edge in morse.cells.get(1, []):
+        for sign, vertex in zip((-1.0, 1.0), morse.faces[edge]):
+            rows.append(indices[vertex]); cols.append(indices[edge]); data.append(sign)
+    boundary = sparse.csr_matrix((data, (rows, cols)), shape=(len(all_cells), len(all_cells)))
     return morse, boundary
+
 
 def prune_complex_to_critical(complex: SimplicialComplex, filtration: Optional[np.ndarray] = None) -> Tuple[SimplicialComplex, sparse.csr_matrix, Dict[int, List[int]]]:
     """Full pruning pipeline: gradient -> matching -> critical cells -> Morse complex + boundary."""
+    if complex.dim > 1:
+        raise NotImplementedError("Only graph complexes are supported")
     vf = compute_discrete_gradient(complex, filtration)
     critical = extract_critical_cells(complex, vf)
     morse, boundary = build_morse_complex(complex, vf, critical)

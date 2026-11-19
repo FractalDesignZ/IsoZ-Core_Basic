@@ -1,5 +1,7 @@
+---
 name: sheaf-memory-gate
-description: Long-term conversation memory gating using sheaf consistency on history stalks. Treats the entire dialogue history as a cellular sheaf. Only zero-energy (ker L⁰_F) global sections are retained or retrieved. Enforces the same topological guardrails as the sheaf-guardian agent on every memory operation.
+description: "Long-term conversation memory gating using sheaf consistency on history stalks. Treats the entire dialogue history as a cellular sheaf. Only zero-energy (ker L⁰_F) global sections are retained or retrieved. Enforces the same topological guardrails as the sheaf-guardian agent on every memory operation."
+---
 
 trigger:
   - "remember this"

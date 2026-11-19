@@ -13,7 +13,10 @@ This replaces the toy embedding graph with real code geometry.
 import ast
 from typing import Dict, List, Tuple, Any
 
-from discrete_morse import SimplicialComplex, prune_complex_to_critical
+try:
+    from .discrete_morse import SimplicialComplex, prune_complex_to_critical
+except ImportError:
+    from discrete_morse import SimplicialComplex, prune_complex_to_critical
 
 def extract_topological_features(tree: ast.AST) -> Tuple[SimplicialComplex, Dict, Dict]:
     """
@@ -37,9 +40,14 @@ def extract_topological_features(tree: ast.AST) -> Tuple[SimplicialComplex, Dict
             if name not in nodes:
                 nodes[name] = node_id
                 node_id += 1
+            previous = self.current_func
             self.current_func = name
-            self.generic_visit(node)
-            self.current_func = None
+            try:
+                self.generic_visit(node)
+            finally:
+                self.current_func = previous
+
+        visit_AsyncFunctionDef = visit_FunctionDef
 
         def visit_Call(self, node):
             nonlocal node_id
@@ -96,7 +104,7 @@ def extract_topological_features(tree: ast.AST) -> Tuple[SimplicialComplex, Dict
         if u_name in nodes and v_name in nodes:
             u = nodes[u_name]
             v = nodes[v_name]
-            eid = 1000 + len(complex.faces)
+            eid = len(nodes) + len(complex.faces)
             complex.cells.setdefault(1, []).append(eid)
             complex.faces[eid] = [u, v]
 

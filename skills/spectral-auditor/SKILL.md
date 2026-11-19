@@ -1,5 +1,7 @@
+---
 name: spectral-auditor
-description: Whole-codebase / large-artifact topological audit skill using persistent homology, sheaf Laplacians, and discrete Morse pruning. Extends the sheaf-guardian to repository scale for global coherence, phase detection, and high-value sparse refactors. Must be used for any system-level analysis or pre-release audit.
+description: "Whole-codebase / large-artifact topological audit skill using persistent homology, sheaf Laplacians, and discrete Morse pruning. Extends the sheaf-guardian to repository scale for global coherence, phase detection, and high-value sparse refactors. Must be used for any system-level analysis or pre-release audit."
+---
 
 workflow:
   1. Receive target (directory, glob, or large artifact list).

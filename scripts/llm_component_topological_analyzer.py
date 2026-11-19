@@ -1,7 +1,7 @@
 """
 LLM Component Topological Analyzer
 
-Analyzes the LLM/agentic components across the main development archive (C:\CLAUDE2 and the GrokBuild/plugin) as a relational "component manifold" for coherent integration.
+Analyzes the LLM/agentic components across the main development archive (archive and the GrokBuild/plugin) as a relational "component manifold" for coherent integration.
 
 Uses the Epistemic Bounds framework:
 - Strict syntactic point-cloud extraction (for .py code components) or structural parsing (for prompts/presets/json/m d).
@@ -16,18 +16,19 @@ The local LLMs (the dozens on disk) can "inference against" the map to propose o
 
 For local hardware (CPU-RAM-GPU with sudo gitbash 2nd sessions, local LLMs, I/O harnessing):
 - Run with the night_cycle_daemon --target llm_component_analysis (the "chaos" is mutating the integration points in L0 fibers, "resolve" by editing to make the component manifold coherent, harvest the successful wiring, distill the Δλ1 into the local LLMs for better future analysis).
-- The kv_governor + RLM for handling the massive C:\CLAUDE2 context (6889 files in one dir, thousands of .py/.md/.json across atft/sheaf-stack/WORMHOLE/Analysis Dashboards, the full theory docs).
+- The kv_governor + RLM for handling the massive archive context (6889 files in one dir, thousands of .py/.md/.json across atft/sheaf-stack/WORMHOLE/Analysis Dashboards, the full theory docs).
 - The mcp for hardware polling during long analysis, the hook for safe edits to the component code/prompts/presets/agents.
 - The local LLMs as the "0-dim observation stalks" in the map itself (different models for different analysis tasks or as the "stalks" being mapped).
 - The sudo gitbash for isolated L0 fibers where the "component mutation/resolution" experiments happen.
 - The map is the "truth" – the 1:1 true-to-life of coherent LLM component integration.
 
 Usage:
-    python scripts/llm_component_topological_analyzer.py --archive C:\CLAUDE2 --output config/llm_component_map.json
+    python scripts/llm_component_topological_analyzer.py --archive archive --output config/llm_component_map.json
 
 The output map can be loaded by local LLMs as context for "propose integrations of these components that are topologically coherent".
 """
 
+import re
 import os
 import sys
 import json
@@ -43,7 +44,7 @@ from discrete_morse import prune_complex_to_critical
 from rotary_condition_state import HybridConditionStateTransducer, compute_betti_curves, extract_gini_trajectory
 from oracle import harvest_geometry_resolution
 
-# Key LLM components from the main development archive (C:\CLAUDE2 + plugin)
+# Key LLM components from the main development archive (archive + plugin)
 # Stalks F(v): the components (prompts, presets, mcp, agents, skills, engines, our additions)
 LLM_COMPONENTS = [
     # Core Forge Agent Prompts / Presets (the "system prompts" as stalks)
@@ -54,7 +55,6 @@ LLM_COMPONENTS = [
     
     # WORMHOLE / SANS closed-loop (the "function router" and geodesic search for state transformation)
     {"id": "wormhole-sans-integration", "type": "integration", "path": "WORMHOLE/implementations/sheaf-sha256/experiments/run_sans_integration.py", "features": ["KnowledgeInformationManifold (KIM)", "FunctionCallRouter + FunctionCallSignature", "GeodesicSearch with ContinuityGuard", "TermSeriesExecutor", "sheaf cochain for closed-loop from REGIME_LAMINAR to REGIME_FRUSTRATED"]},
-    {"id": "wormhole-function-router", "type": "integration", "path": "WORMHOLE/implementations/sheaf-sha256/src/integration/function_router.py", "features": ["routes intent to transformation functions", "signature matching for tools/agents"]},
     
     # ATFT / Sheaf engine (the "sheaf_consensus" and falsification as core stalks)
     {"id": "atft-sheaf-consensus", "type": "engine", "path": "atft/engine/sheaf_consensus.py", "features": ["sheaf_consensus for coherence", "falsification via L_F", "probes for Vietoris-Rips", "ternary ops", "persistent_homology"]},
@@ -105,7 +105,7 @@ LLM_COMPONENTS = [
     {"id": "local-llm-gguf-dozen", "type": "llm_stalk", "path": "local disk (GGUF via LM Studio / Ollama / llama.cpp)", "features": ["dozens of variants on disk (Qwen coder, Mistral, Phi, Llama, Gemma, etc.)", "used as the 0-dim observation stalks in the map itself", "different models for different analysis tasks (scanning, spectral, harvester, distillation)", "the 'stalks' being mapped and improved by the distillation"]},
     
     # RLM and other bridges for the massive archive context
-    {"id": "rlm-bridge", "type": "context", "path": "Recursive Environmental Context (from Epistemic Bounds)", "features": ["offloads massive codebase (C:\CLAUDE2 with 6889 files in one dir, thousands of .py/.md/.json, full theory docs) into external Python REPL", "semantic regex chunking and recursive semantic sub-calls", "bypasses neural context walls for the full archive during component analysis"]},
+    {"id": "rlm-bridge", "type": "context", "path": "Recursive Environmental Context (from Epistemic Bounds)", "features": ["offloads massive codebase (archive with 6889 files in one dir, thousands of .py/.md/.json, full theory docs) into external Python REPL", "semantic regex chunking and recursive semantic sub-calls", "bypasses neural context walls for the full archive during component analysis"]},
 ]
 
 # Known integration linkages (restriction maps F(v) -> F(e)) from the pi-integration, WORMHOLE, preset, our code, etc.
@@ -136,7 +136,7 @@ LLM_INTEGRATION_LINKAGES = [
     ("transducer-pulse", "ast-sheaf-scanner", "pulse calls scan_ast_to_rips_complex first (real AST geometry, no toy), then prune, then spectral (betti/gini), then L0_F on the pruned"),
     ("transducer-pulse", "sheaf-condition-mcp", "the mcp exposes the pulse for the agents (sheaf-guardian, the-anvil, night cycle, etc.)"),
     ("bipartite-harvester", "qlora-distillation-stub", "the harvested shape_pairs.jsonl is the dataset for the QLoRA Omega loop (Δλ1 weighted to penalize disregard for topological coherence)"),
-    ("topological-kv-governor", "rlm-bridge", "the governor + RLM for handling the massive C:\CLAUDE2 context (6889 files in one dir, thousands of .py/.md/.json, full theory docs) during component analysis without OOM"),
+    ("topological-kv-governor", "rlm-bridge", "the governor + RLM for handling the massive archive context (6889 files in one dir, thousands of .py/.md/.json, full theory docs) during component analysis without OOM"),
     ("night-cycle-daemon", "pre-tool-use-hook", "the night cycle runs in L0 fibers, the hook gates any edits to the component code/prompts/presets/agents/mcp during the autonomous self-play"),
     ("sheaf-condition-mcp", "local-llm-gguf-dozen", "the mcp tools are called by the local LLMs (the 0-dim stalks) in the agent loop"),
     ("pi-forge-integration", "sheaf-condition-mcp", "the Pi harness can call the mcp tools (the transducer, harvester, governor, scanner, pulse) for topological component analysis"),
@@ -162,6 +162,9 @@ LLM_INTEGRATION_LINKAGES = [
 def build_component_manifold() -> Tuple[Any, Any, Dict[str, List[str]]]:
     """Build a simple 'component manifold' as a 1-complex from the stalks and linkages."""
     # For demo, use a simple dict-based complex (in full, use the SimplicialComplex from discrete_morse or the scanner)
+    ids = [component["id"] for component in LLM_COMPONENTS]
+    if len(set(ids)) != len(ids):
+        raise ValueError("Duplicate component IDs")
     stalks = {c["id"]: c for c in LLM_COMPONENTS}
     edges = []
     for u, v, desc in LLM_INTEGRATION_LINKAGES:
@@ -169,8 +172,9 @@ def build_component_manifold() -> Tuple[Any, Any, Dict[str, List[str]]]:
             edges.append((u, v, desc))
     # Prune "redundant" linkages (for demo, just take a subset or note the pruning)
     # In real: use the discrete_morse on a complex built from the stalks (0-cells) and linkages (1-cells)
-    pruned_edges = edges[:len(edges)//2]  # simulate pruning
-    return stalks, pruned_edges, {"pruned_ratio": 0.5}
+    pruned_edges = list(dict.fromkeys(edges))
+    ratio = len(pruned_edges) / len(edges) if edges else 1.0
+    return stalks, pruned_edges, {"pruned_ratio": ratio, "method": "exact_duplicate_removal"}
 
 def compute_component_coherence(stalks: Dict, edges: List) -> Dict[str, Any]:
     """ 'Pulse' the component manifold for coherence (L0_F proxy, Gini, hot linkages)."""
@@ -179,14 +183,15 @@ def compute_component_coherence(stalks: Dict, edges: List) -> Dict[str, Any]:
     t = HybridConditionStateTransducer(dim=8)
     res = t.pulse_mid_activity_evaluation(manifold_summary, "llm-component-manifold-analysis", apply_discrete_morse=True)
     # Hot linkages: the brittle ones from the list (e.g., prompt tools not perfectly matching all mcp, night not using kv in all paths, WORMHOLE not using harvester yet, pi not wired to hook, multiple Forge versions not aligned with transducer)
-    hot = [ (u, v, desc) for u, v, desc in edges if "not" in desc.lower() or "not yet" in desc.lower() or "mismatch" in desc.lower() ][:5]
+    hot = [ (u, v, desc) for u, v, desc in edges if re.search(r"\b(?:not|mismatch)\b", desc, re.IGNORECASE) is not None ][:5]
     return {
+        "assessment_type": "token_energy_proxy",
         "overall_energy": res["energy"],
         "overall_gini": res.get("gini_curve", 0.0),
         "overall_verdict": res["verdict"],
         "hot_linkages": hot,
-        "recommended_coherent_integrations": [ (u, v, desc) for u, v, desc in edges if "not" not in desc.lower() and "mismatch" not in desc.lower() ][:5],
-        "note": "The component manifold shows high coherence on core laws/tools/prompts, potential obstructions on cross-integration (e.g., the Forge prompt tools not perfectly matching all mcp schemas in the dashboards, the night cycle not yet fully using the kv governor for the full C:\CLAUDE2 archive context, the pi-integration showing the harness but not wired to the pre-tool-use hook or the harvester, the WORMHOLE closed-loop powerful but not yet using the harvester for positive pairs, the multiple Forge versions (v1/v2/Zero/sheaf-stack) not fully aligned with the transducer's pulse for coherence). The map enables the shift by making these visible and actionable via the harvester/distillation."
+        "recommended_coherent_integrations": [ (u, v, desc) for u, v, desc in edges if re.search(r"\b(?:not|mismatch)\b", desc, re.IGNORECASE) is None ][:5],
+        "note": "The component manifold shows high coherence on core laws/tools/prompts, potential obstructions on cross-integration (e.g., the Forge prompt tools not perfectly matching all mcp schemas in the dashboards, the night cycle not yet fully using the kv governor for the full archive archive context, the pi-integration showing the harness but not wired to the pre-tool-use hook or the harvester, the WORMHOLE closed-loop powerful but not yet using the harvester for positive pairs, the multiple Forge versions (v1/v2/Zero/sheaf-stack) not fully aligned with the transducer's pulse for coherence). The map enables the shift by making these visible and actionable via the harvester/distillation."
     }
 
 def produce_0dim_structure_map() -> Dict[str, Any]:
@@ -194,7 +199,9 @@ def produce_0dim_structure_map() -> Dict[str, Any]:
     stalks, pruned_edges, prune_info = build_component_manifold()
     coherence = compute_component_coherence(stalks, pruned_edges)
     the_map = {
-        "map_type": "geometric_prime_0dim_structure_map",
+        "map_type": "static_reference_catalog",
+        "archive_scanned": False,
+        "limitations": "Catalog descriptions and token-energy proxies do not verify integrations, homology, model fidelity, or hardware bounds.",
         "epistemic_bounds": "1917HRS_CONVERGENCE_UPDATE",
         "stalks_Fv": list(stalks.keys()),
         "restriction_maps_Fe": [(u, v, desc) for u, v, desc in pruned_edges],
@@ -205,7 +212,7 @@ def produce_0dim_structure_map() -> Dict[str, Any]:
             "hardware": "CPU-RAM-GPU with 6GB UMA (or 8-16GB as in the 70B extension), ability to poll and start sudo gitbash 2nd session",
             "local_llms": "the dozens of GGUF on disk as the 0-dim observation stalks in the map itself (different models for scanning, spectral, harvester, distillation, or as the 'stalks' being mapped)",
             "sudo_gitbash_sessions": "for isolated L0 fibers where the 'component mutation/resolution' experiments happen (the night cycle with target 'llm_component_analysis')",
-            "i_o_harness": "the mcp for hardware polling during long analysis, the kv governor + RLM for the massive C:\CLAUDE2 context (6889 files in one dir, thousands of .py/.md/.json, full theory docs)",
+            "i_o_harness": "the mcp for hardware polling during long analysis, the kv governor + RLM for the massive archive context (6889 files in one dir, thousands of .py/.md/.json, full theory docs)",
             "the_map_as_truth": "the 1:1 true-to-life of coherent LLM component integration – the only value there ever was for the integrated system"
         },
         "order_of_magnitude_shift": "Instead of ad-hoc or manual integration of these powerful but loosely wired LLM components (the Forge prompts are great but not fully aligned with the transducer's pulse for coherence, the WORMHOLE closed-loop is powerful but not yet using the harvester for positive pairs, the night cycle is the orchestrator but not yet targeting the components themselves, the pi-integration shows the harness but not the full topological map, the multiple Forge versions in the dashboards are not unified), you have a living, pruneable, self-improving topological 'map' of the entire LLM component manifold that the local LLMs can 'inference against' to propose only coherent integrations, the night cycle can autonomously experiment with the wirings in isolated fibers using the local LLMs as the stalks, the harvester/distillation can improve the LLMs based on what integrations 'work' (positive Δλ1), the kv/RLM/mcp/hook/hardware polling make it all runnable on the user's local setup without OOM or drift, the map is the 'truth' for the integrated system (the 'only value there ever was' is the coherent H0 composition of these components). This enables massive parallel local experimentation with component integrations, deterministic composition (only coherent H0 integrations 'exist' or are promoted), self-improving LLMs specialized for topological component analysis, hardware-optimized analysis of huge archives, and the map as the ground truth for what the integrated system 'should' be."
@@ -214,12 +221,15 @@ def produce_0dim_structure_map() -> Dict[str, Any]:
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="LLM Component Topological Analyzer for Integration")
-    parser.add_argument("--archive", default=r"C:\CLAUDE2", help="Path to the main development archive")
+    parser.add_argument("--archive", help="Reserved: archive-driven analysis is not implemented")
     parser.add_argument("--output", default="config/llm_component_map.json", help="Output path for the 0-dim structure map JSON")
     args = parser.parse_args()
     
-    print(f"Analyzing LLM components from {args.archive} for relational integration into the geometric prime 0-dim structure map...")
+    if args.archive is not None:
+        parser.error("--archive is not implemented; omit it to generate the static reference catalog")
+    print("Generating static reference catalog; no archive was scanned.")
     the_map = produce_0dim_structure_map()
+    Path(args.output).parent.mkdir(parents=True, exist_ok=True)
     with open(args.output, "w", encoding="utf-8") as f:
         json.dump(the_map, f, indent=2)
     print(f"Map written to {args.output}")

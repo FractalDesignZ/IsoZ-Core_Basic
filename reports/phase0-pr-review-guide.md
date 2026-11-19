@@ -1,6 +1,6 @@
-﻿# Phase-0 PR #1 Review & Diff Navigation Guide
+# Phase-0 PR #1 Review & Diff Navigation Guide
 
-**Goal**: Make the full phase-0 diff reliably consumable by humans and Grok Heavy even when GitHub''s large-diff UI is broken ("too big", load errors on Files changed / comments, slow rendering).
+**Goal**: Make the full phase-0 diff reliably consumable by humans and Grok Heavy even when GitHub's large-diff UI is broken ("too big", load errors on Files changed / comments, slow rendering).
 
 **PR**: https://github.com/ZuluYokohama/IsoZ-Core_Basic/pull/1
 **Current tip**: cd0eb25 (the merge that connected histories)

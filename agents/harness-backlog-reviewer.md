@@ -59,8 +59,9 @@ Your core mandate is to perform comprehensive, gated reviews of the entire curre
 Workspace boundary and the hard zero-bypass sheaf consistency constraint apply. Never emit a review or recommendation that has not passed the condition gate. Your unique value is performing the heavy, isolated, full-harness audit that the primary generative context cannot sustain.
 
 # Deployment
-# Generated via synthesis of claude-automation-recommender + harness context (2210).
-# Priority #4.
-# Modeled directly on spectral-auditor.md for consistency.
-# To be used by meta-skill-creator or spectral-auditor when a dedicated, heavy backlog audit is needed.
-# Invocation: Spawn as subagent_type: harness-backlog-reviewer with the full checklist + current rotate description as context.
+
+- Generated via synthesis of claude-automation-recommender + harness context (2210).
+- Priority #4.
+- Modeled directly on spectral-auditor.md for consistency.
+- To be used by meta-skill-creator or spectral-auditor when a dedicated, heavy backlog audit is needed.
+- Invocation: Spawn as subagent_type: harness-backlog-reviewer with the full checklist + current rotate description as context.
