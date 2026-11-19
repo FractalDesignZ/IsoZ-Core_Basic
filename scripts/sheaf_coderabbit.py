@@ -34,9 +34,11 @@ except ImportError:
     from rotary_condition_state import pulse, read_state, TRANSDUCER
     from oracle import handle_obstruction
 
-def review_artifact(artifact: str, context: str = "code-review", format: str = "markdown") -> dict:
-    """Core review operation. Infiltrate -> compute truth & linkages -> exfil structured review."""
-    result = pulse(artifact, context)
+def review_artifact(artifact: str, context: str = "code-review", format: str = "markdown", apply_discrete_morse: bool = True) -> dict:
+    """Core review operation. Infiltrate -> compute truth & linkages -> exfil structured review.
+    Per Epistemic Bounds: applies discrete_morse_prune (via pulse flag) for sparsification before Laplacian.
+    """
+    result = pulse(artifact, context, apply_discrete_morse=apply_discrete_morse)
     state = read_state()
 
     # Build CodeRabbit-style findings focused on linkages and truth
@@ -50,7 +52,7 @@ def review_artifact(artifact: str, context: str = "code-review", format: str = "
             "title": "High-energy restriction maps detected (semantic drift)",
             "detail": result.get("obstruction", "Non-zero Laplacian energy on stalks"),
             "suggestion": "Infiltrate corrections at these hot linkage points. Consider refactoring to reduce embedding distance between linked symbols.",
-            "locations": list(hot.keys())[:5],
+            "locations": hot[:5],
         })
         # Offer to infiltrate "truth" (e.g. a note about the obstruction)
         TRANSDUCER.state.infiltrated_truth.append(f"Obstruction at pulse {result['pulse_count']}: {result.get('obstruction')}")
@@ -75,6 +77,7 @@ def review_artifact(artifact: str, context: str = "code-review", format: str = "
             "infiltrated_truth_items": len(state.get("infiltrated_truth", [])),
         },
         "raw_pulse": result,
+        **{key: result.get(key) for key in ("sparsification_applied", "original_stalk_count", "original_edge_count", "stalk_count", "pruned_stalk_count", "sparsification_ratio", "morse_boundary_shape", "kernel_member", "gini_curve", "homology_preservation")},
     }
 
     return review
@@ -101,12 +104,27 @@ def format_review(review: dict, fmt: str = "markdown") -> str:
 
     if review.get("hot_linkages"):
         lines.append("### Top Hot Linkages (highest disagreement — prime maneuver space for streamlining)")
-        for (u, v), e in list(review["hot_linkages"].items())[:5]:
+        for linkage in review["hot_linkages"][:5]:
+            u, v, e = linkage["source"], linkage["target"], linkage["energy"]
             lines.append(f"- `{u}` ↔ `{v}` : disagreement energy {e}")
         lines.append("")
 
+    # Epistemic Bounds: Sparsification & Preservation Report (for evidentiary exfil in CR/PR)
+    if review.get("sparsification_applied") or review.get("original_stalk_count"):
+        lines.append("### Sparsification & Preservation Report (Discrete Morse + Berkouk-Ginot Isometry)")
+        orig_s = review.get("original_stalk_count", review.get("stalk_count", "?"))
+        orig_e = review.get("original_edge_count", review.get("edge_count", "?"))
+        pruned_s = review.get("pruned_stalk_count", "?")
+        ratio = review.get("sparsification_ratio", 1.0)
+        lines.append(f"- Cell reduction: {orig_s} stalks / {orig_e} edges → {pruned_s} stalks (ratio {ratio})")
+        lines.append(f"- Morse boundary shape: {review.get('morse_boundary_shape', 'N/A')}")
+        lines.append(f"- Betti / homology preservation: {review.get('homology_preservation') or 'not_checked'}")
+        lines.append(f"- Original-graph Dirichlet energy: {review.get('energy', 'N/A')} (kernel_member: {review.get('kernel_member', '?')})")
+        lines.append("- Graph collapse is a preview. Energy is evaluated on the original graph; sheaf-energy preservation and UMA bounds are not verified.")
+        lines.append("")
+
     lines.append(f"**Overall Recommendation:** {review.get('recommendation')}")
-    lines.append("\n---\n*Powered by IsoZ-Core sheaf-guardian (model-agnostic truth engine). MCP infil/exfil via rotate_condition.*")
+    lines.append("\n---\n*Powered by IsoZ-Core sheaf-guardian (model-agnostic truth engine). MCP infil/exfil via rotate_condition. Discrete Morse pruning for edge UMA compliance.*")
     return "\n".join(lines)
 
 def main():

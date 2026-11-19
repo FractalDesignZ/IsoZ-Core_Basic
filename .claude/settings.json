@@ -1,0 +1,26 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Write|Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"${GROK_PLUGIN_ROOT:-${CLAUDE_PROJECT_DIR:-$PWD}}/hooks/pre-tool-use.sh\""
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Write|Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${GROK_PLUGIN_ROOT:-${CLAUDE_PROJECT_DIR:-$PWD}}/scripts/tool_use_hook.py\" --post"
+          }
+        ]
+      }
+    ]
+  }
+}

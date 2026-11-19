@@ -14,6 +14,9 @@ from __future__ import annotations
 import hashlib
 import json
 import time
+import re
+import threading
+from pathlib import Path
 from dataclasses import dataclass, asdict
 from typing import Any, Dict, List, Optional
 
@@ -115,6 +118,61 @@ def handle_obstruction(energy: float, obstruction: Optional[str], stalks: List[s
         "shape_pair": asdict(pair),
         "resolution": resolution,
         "stats": ORACLE.get_stats(),
+    }
+
+# Geometry Harvester (Bipartite Router for positive resolutions - Node γ activation)
+HARVEST_LOCK = threading.Lock()
+
+
+def scrub_local_paths(value):
+    """Keep worktree-relative identifiers in portable training examples."""
+    if isinstance(value, dict): return {key: scrub_local_paths(item) for key, item in value.items()}
+    if isinstance(value, list): return [scrub_local_paths(item) for item in value]
+    if isinstance(value, str):
+        return re.sub(r"[A-Za-z]:[\\/][^\s\"']*?[\\/]worktrees[\\/]", "worktrees/", value, flags=re.IGNORECASE)
+    return value
+
+def harvest_geometry_resolution(pre_obstruction: Optional[Dict], post_resolution: Dict, delta_lambda: float, stalks: List[str]) -> Dict[str, Any]:
+    """
+    The Geometry Harvester (Bipartite Router activation).
+    When a positive coherence shift (Δλ₁) is achieved during L0 → L3 upward flow,
+    harvest the Shape Pair: (pre-state obstruction, post-state verified H^0 resolution map).
+    Log to shape_pairs.jsonl for the Omega Feedback Loop / QLoRA distillation.
+    """
+    if post_resolution.get("verdict") != "CONSISTENT":
+        return {"action": "obstructed_not_harvested"}
+    if delta_lambda <= 0:
+        return {"action": "no_positive_shift", "delta": delta_lambda}
+
+    pair = {
+        "pre_state": pre_obstruction or {"type": "initial", "energy": "unknown"},
+        "post_state": post_resolution,
+        "delta_lambda": delta_lambda,
+        "stalks_involved": stalks[:12],
+        "timestamp": time.time(),
+        "knot_id": hashlib.sha256(f"resolution:{delta_lambda}:{time.time()}".encode()).hexdigest()[:16],
+    }
+
+    pair = scrub_local_paths(pair)
+    # Log to shape_pairs.jsonl (append for continuous harvesting)
+    try:
+        with HARVEST_LOCK:
+            output = Path("shape_pairs.jsonl")
+            count = 0
+            if output.exists():
+                with output.open(encoding="utf-8") as existing:
+                    count = sum(1 for line in existing if line.strip())
+            with output.open("a", encoding="utf-8") as f:
+                f.write(json.dumps(pair) + "\n")
+            total_harvested = count + 1
+    except Exception as e:
+        return {"action": "harvest_failed", "error": str(e)}
+
+    return {
+        "action": "geometry_harvested",
+        "shape_pair": pair,
+        "logged_to": "shape_pairs.jsonl",
+        "stats": {"total_harvested": total_harvested}
     }
 
 

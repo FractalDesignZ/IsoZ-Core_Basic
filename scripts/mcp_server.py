@@ -1,210 +1,164 @@
 #!/usr/bin/env python3
-"""
-scripts/mcp_server.py
-FastMCP Unified Runtime for the Sheaf Condition MCP.
-
-Exposes:
-  - rotate_condition(artifact, context?) -> condition pulse result + gating decision
-  - read_condition_state() -> current transducer + oracle state
-
-This server is launched by Grok Build (via .mcp.json) as a stdio MCP server.
-The sheaf-guardian agent type is expected to call these tools before emitting
-significant generated content.
-
-Implements the "rotate_condition" and "read_condition_state" tools described in the spec.
-"""
-
+"""Shared FastMCP and minimal stdio tool surface for the simulation harness."""
 from __future__ import annotations
-import asyncio
+import contextlib
+import inspect
 import json
 import os
+from pathlib import Path
 import sys
+import threading
 from typing import Any, Dict
 
-# Prefer fastmcp if installed; fall back to a minimal stdio JSON-RPC loop that is MCP-compatible enough.
-# Users: pip install "mcp[cli]" or "fastmcp"
-
-try:
-    from fastmcp import FastMCP  # type: ignore
-    HAVE_FASTMCP = True
-except Exception:
-    HAVE_FASTMCP = False
-
-# Import our local engine (must be in PYTHONPATH or same dir)
-try:
-    from rotary_condition_state import pulse, read_state, TRANSDUCER
-    from oracle import handle_obstruction, ORACLE
-except ImportError:
-    # Allow running from within scripts/ dir
-    sys.path.insert(0, os.path.dirname(__file__))
-    from rotary_condition_state import pulse, read_state, TRANSDUCER  # type: ignore
-    from oracle import handle_obstruction, ORACLE  # type: ignore
+sys.path.insert(0, str(Path(__file__).parent))
+from rotary_condition_state import pulse, read_state, TRANSDUCER
+from oracle import handle_obstruction, ORACLE
+from discrete_morse import prune_stalk_complex
+from sheaf_svd_quantizer import sheaf_svd_quantize, load_synthetic_model
+import hardware_piping as hw_piping
 
 
-def _make_tool_response(result: Dict[str, Any]) -> Dict[str, Any]:
-    # MCP tool responses are usually just the structured content
+def rotate_condition(artifact: str, context: str = "agent-generation") -> Dict[str, Any]:
+    result = pulse(artifact, context)
+    decision = dict(result, pulse_summary=result, consistency_radius=TRANSDUCER.ComputeConsistencyRadius())
+    if result["verdict"] != "CONSISTENT":
+        decision["oracle_action"] = handle_obstruction(result["energy"], result.get("obstruction"), list(TRANSDUCER.state.stalks))
+        decision["recommendation"] = "DO NOT EMIT until obstruction resolved."
+    return decision
+
+
+def read_condition_state() -> Dict[str, Any]:
+    return dict(read_state(), oracle=ORACLE.get_stats(), transducer_class="HybridConditionStateTransducer")
+
+
+def discrete_morse_prune(artifact: str = "", context: str = "prune-request", worktree: str = "") -> Dict[str, Any]:
+    if artifact:
+        return pulse(artifact, context, apply_discrete_morse=True)
+    stalks, edges = TRANSDUCER.state.stalks, TRANSDUCER.state.edges
+    reduced, reduced_edges, ratio = prune_stalk_complex(stalks, edges)
+    return {"original_stalk_count": len(stalks), "original_edge_count": len(edges),
+            "pruned_stalk_count": len(reduced), "pruned_edge_count": len(reduced_edges),
+            "sparsification_ratio": ratio, "homology_preservation": "not_checked",
+            "note": "Preview only. Original state is retained for the energy gate."}
+
+
+def topological_kv_govern(tokens: list[str] | None = None, current_vram: float = 5.9) -> dict:
+    from topological_kv_governor import TopologicalKVGovernor
+    return TopologicalKVGovernor().govern(tokens or [], current_vram_gb=current_vram)
+
+
+def _run_svd_quantize(model: str = "synthetic", hidden: int = 32, layers: int = 1, preserve_ratio: float = 0.18) -> Dict[str, Any]:
+    if model != "synthetic":
+        raise ValueError("MCP quantization supports only model='synthetic'; use the quantizer CLI for checkpoints")
+    if not 1 <= hidden <= 64 or not 1 <= layers <= 4:
+        raise ValueError("Synthetic MCP demo requires hidden in 1..64 and layers in 1..4")
+    with contextlib.redirect_stdout(sys.stderr):
+        qmap = sheaf_svd_quantize(load_synthetic_model(hidden, layers), preserve_ratio=preserve_ratio)
+    out = Path(__file__).resolve().parents[1] / "config/ternary_mcp_ggufmap.json"
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(json.dumps(qmap, indent=2), encoding="utf-8")
+    return {"status": "synthetic_quantized", "model": model, "layers": len(qmap["layers"]),
+            "map_path": str(out), "h0_maintainer_energy": qmap["h0_maintainer_energy"],
+            "note": "Synthetic proxy map; custom llama.cpp integration is not implemented."}
+
+
+run_sheaf_svd_quantize = _run_svd_quantize
+
+
+def _apply_ternary_map(model_path: str = "", gguf_map_path: str = "config/ternary_mcp_ggufmap.json") -> Dict[str, Any]:
+    qmap = json.loads(Path(gguf_map_path).read_text(encoding="utf-8"))
+    with contextlib.redirect_stdout(sys.stderr):
+        bridge = hw_piping.LlamaCppTopologicalBridge(hw_piping.LlamaCppBridgeConfig(model_path=model_path))
+        result = bridge.apply_ternary_gguf_map(qmap)
+    return {"status": result["status"], "applied": result, "backend": bridge._backend_type}
+
+
+apply_ternary_map_to_llama = _apply_ternary_map
+
+
+def start_night_cycle(cycles: int = 2, parallel: int = 4, batch: int = 5) -> dict:
+    from night_cycle_daemon import run_night_cycle
+    if cycles < 1 or parallel < 1 or batch < 1:
+        raise ValueError("cycles, parallel, and batch must be positive")
+    threading.Thread(target=run_night_cycle, kwargs=dict(cycles=cycles, parallel=parallel, batch=batch), daemon=True).start()
+    return {"status": "started", "simulation": True, "cycles": cycles, "parallel": parallel, "batch": batch}
+
+
+TOOLS = {name: globals()[name] for name in (
+    "rotate_condition", "read_condition_state", "discrete_morse_prune", "topological_kv_govern",
+    "run_sheaf_svd_quantize", "apply_ternary_map_to_llama", "start_night_cycle")}
+
+
+def _make_tool_response(result):
     return {"content": [{"type": "text", "text": json.dumps(result, indent=2)}]}
 
 
-# --------------------------------------------------------------------------------------
-# FastMCP path (preferred)
-# --------------------------------------------------------------------------------------
-if HAVE_FASTMCP:
-    mcp = FastMCP("sheaf-condition-mcp")
+def _schema(function):
+    properties, required = {}, []
+    for name, parameter in inspect.signature(function).parameters.items():
+        default = parameter.default
+        kind = "string"
+        if name in {"hidden", "layers", "cycles", "parallel", "batch"}: kind = "integer"
+        elif name in {"preserve_ratio", "current_vram"}: kind = "number"
+        elif name == "tokens": kind = "array"
+        properties[name] = {"type": kind}
+        if kind == "array": properties[name]["items"] = {"type": "string"}
+        if default is inspect.Parameter.empty: required.append(name)
+        elif default is not None: properties[name]["default"] = default
+    return {"type": "object", "properties": properties, "required": required, "additionalProperties": False}
 
-    @mcp.tool()
-    def rotate_condition(artifact: str, context: str = "agent-generation") -> Dict[str, Any]:
-        """
-        Primary gating tool. The agent MUST call this (or read after) on candidate outputs.
-        Runs the HybridConditionStateTransducer pulse + oracle handling if obstructed.
-        """
-        pulse_result = pulse(artifact, context)
 
-        decision = {
-            "verdict": pulse_result["verdict"],
-            "energy": pulse_result["energy"],
-            "kernel_member": pulse_result["kernel_member"],
-            "obstruction": pulse_result.get("obstruction"),
-            "delta_lambda": pulse_result["delta_lambda"],
-            "consistency_radius": TRANSDUCER.ComputeConsistencyRadius(),
-            # CodeRabbit-style linkage review info - best "maneuver space" for infil/exfil of truth
-            "hot_linkages": pulse_result.get("hot_linkages", {}),
-            "linkage_review": "Review these high-disagreement restriction maps (edges) between semantic stalks for refactoring opportunities to streamline truth.",
-        }
+class MinimalMCP:
+    def __init__(self):
+        self.tools = {name: {"description": (fn.__doc__ or name), "inputSchema": _schema(fn)} for name, fn in TOOLS.items()}
 
-        if not pulse_result["kernel_member"] and pulse_result.get("obstruction"):
-            oracle_action = handle_obstruction(
-                pulse_result["energy"],
-                pulse_result.get("obstruction"),
-                list(TRANSDUCER.state.stalks.keys()),
-            )
-            decision["oracle_action"] = oracle_action
-            decision["recommendation"] = "DO NOT EMIT. Resolve obstruction or request oracle correction first. Focus infil/exfil at the hot_linkages above."
-
-        decision["pulse_summary"] = pulse_result
-        return decision
-
-    @mcp.tool()
-    def read_condition_state() -> Dict[str, Any]:
-        """Returns full current transducer state + oracle stats for inspection / debugging."""
-        state = read_state()
-        state["oracle"] = ORACLE.get_stats()
-        state["transducer_class"] = "HybridConditionStateTransducer"
-        return state
-
-    def main():
-        print("Starting FastMCP sheaf-condition server...", file=sys.stderr)
-        mcp.run()
-
-# --------------------------------------------------------------------------------------
-# Minimal stdio MCP-compatible fallback (no external deps beyond stdlib)
-# This speaks a subset of MCP JSON-RPC over stdio so Grok can still use the tools.
-# --------------------------------------------------------------------------------------
-else:
-    class MinimalMCP:
-        def __init__(self):
-            self.tools = {
-                "rotate_condition": {
-                    "description": "Run sheaf condition pulse / Laplacian energy gate on an artifact. Returns verdict + oracle resolution if needed.",
-                    "inputSchema": {
-                        "type": "object",
-                        "properties": {
-                            "artifact": {"type": "string"},
-                            "context": {"type": "string", "default": "agent-generation"},
-                        },
-                        "required": ["artifact"],
-                    },
-                },
-                "read_condition_state": {
-                    "description": "Read current global sheaf condition state, energy, stalks, oracle stats.",
-                    "inputSchema": {"type": "object", "properties": {}},
-                },
-            }
-
-        def handle_request(self, req: Dict[str, Any]) -> Dict[str, Any] | None:
-            method = req.get("method")
+    def handle_request(self, req):
+        rid, method = req.get("id"), req.get("method")
+        if "id" not in req: return None
+        result = None
+        if method == "initialize":
+            result = {"protocolVersion": "2024-11-05", "capabilities": {"tools": {}}, "serverInfo": {"name": "sheaf-condition-mcp", "version": "0.1.0"}}
+        elif method == "tools/list":
+            result = {"tools": [dict(name=name, **meta) for name, meta in self.tools.items()]}
+        elif method == "tools/call":
             params = req.get("params") or {}
-            rid = req.get("id")
-
-            if method == "initialize":
-                return {
-                    "jsonrpc": "2.0",
-                    "id": rid,
-                    "result": {
-                        "protocolVersion": "2024-11-05",
-                        "capabilities": {"tools": {}},
-                        "serverInfo": {"name": "sheaf-condition-mcp", "version": "0.1.0"},
-                    },
-                }
-
-            if method == "tools/list":
-                tools_list = []
-                for name, meta in self.tools.items():
-                    tools_list.append({
-                        "name": name,
-                        "description": meta["description"],
-                        "inputSchema": meta["inputSchema"],
-                    })
-                return {"jsonrpc": "2.0", "id": rid, "result": {"tools": tools_list}}
-
-            if method == "tools/call":
-                name = params.get("name")
-                arguments = params.get("arguments") or {}
-
-                if name == "rotate_condition":
-                    artifact = arguments.get("artifact", "")
-                    context = arguments.get("context", "agent-generation")
-                    result = rotate_condition_fallback(artifact, context)  # type: ignore[name-defined]
-                    return {"jsonrpc": "2.0", "id": rid, "result": result}
-
-                if name == "read_condition_state":
-                    result = read_condition_state_fallback()  # type: ignore[name-defined]
-                    return {"jsonrpc": "2.0", "id": rid, "result": result}
-
-                return {"jsonrpc": "2.0", "id": rid, "error": {"code": -32601, "message": f"Unknown tool {name}"}}
-
-            # notifications etc. - ignore for minimal
-            return None
-
-    def rotate_condition_fallback(artifact: str, context: str = "agent-generation") -> Dict[str, Any]:
-        pulse_result = pulse(artifact, context)
-        decision: Dict[str, Any] = {
-            "verdict": pulse_result["verdict"],
-            "energy": pulse_result["energy"],
-            "kernel_member": pulse_result["kernel_member"],
-            "obstruction": pulse_result.get("obstruction"),
-            "delta_lambda": pulse_result["delta_lambda"],
-            "consistency_radius": TRANSDUCER.ComputeConsistencyRadius(),
-            "pulse_summary": pulse_result,
-        }
-        if not pulse_result["kernel_member"] and pulse_result.get("obstruction"):
-            decision["oracle_action"] = handle_obstruction(
-                pulse_result["energy"], pulse_result.get("obstruction"), list(TRANSDUCER.state.stalks.keys())
-            )
-            decision["recommendation"] = "DO NOT EMIT until obstruction resolved."
-        return decision
-
-    def read_condition_state_fallback() -> Dict[str, Any]:
-        state = read_state()
-        state["oracle"] = ORACLE.get_stats()
-        state["transducer_class"] = "HybridConditionStateTransducer (minimal)"
-        return state
-
-    def main():
-        server = MinimalMCP()
-        # Simple line-based JSON-RPC loop
-        for line in sys.stdin:
-            line = line.strip()
-            if not line:
-                continue
+            name, arguments = params.get("name"), params.get("arguments") or {}
+            if name not in TOOLS:
+                return {"jsonrpc": "2.0", "id": rid, "error": {"code": -32602, "message": f"Unknown tool {name}"}}
             try:
-                req = json.loads(line)
-            except Exception:
-                continue
-            resp = server.handle_request(req)
-            if resp is not None:
-                sys.stdout.write(json.dumps(resp) + "\n")
-                sys.stdout.flush()
+                inspect.signature(TOOLS[name]).bind(**arguments)
+                with contextlib.redirect_stdout(sys.stderr):
+                    result = _make_tool_response(TOOLS[name](**arguments))
+            except Exception as error:
+                result = {"isError": True, "content": [{"type": "text", "text": str(error)}]}
+        elif method == "ping": result = {}
+        else:
+            return {"jsonrpc": "2.0", "id": rid, "error": {"code": -32601, "message": f"Unknown method {method}"}}
+        return {"jsonrpc": "2.0", "id": rid, "result": result}
+
+
+try:
+    from fastmcp import FastMCP
+except ImportError:
+    FastMCP = None
+
+
+def main():
+    if FastMCP is not None and os.environ.get("SHEAF_MINIMAL_MCP") != "1":
+        mcp = FastMCP("sheaf-condition-mcp")
+        for name, function in TOOLS.items(): mcp.tool(name=name)(function)
+        mcp.run()
+        return
+    server = MinimalMCP()
+    for line in sys.stdin:
+        try:
+            request = json.loads(line)
+            if not isinstance(request, dict): raise ValueError("Request must be an object")
+            response = server.handle_request(request)
+        except (ValueError, TypeError) as error:
+            response = {"jsonrpc": "2.0", "id": None, "error": {"code": -32700, "message": str(error)}}
+        if response is not None:
+            print(json.dumps(response), flush=True)
 
 
 if __name__ == "__main__":
